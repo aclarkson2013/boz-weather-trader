@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -34,7 +34,7 @@ def _make_forecast(
     return WeatherForecast(
         city=CityEnum(city),
         source=source,
-        forecast_date=forecast_date or datetime(2026, 2, 10, tzinfo=UTC),
+        forecast_date=forecast_date or datetime.now(UTC) - timedelta(days=10),
         forecast_high_f=forecast_high_f,
         fetched_at=datetime.now(UTC),
     )
@@ -48,7 +48,7 @@ def _make_settlement(
     """Create a Settlement ORM model."""
     return Settlement(
         city=CityEnum(city),
-        settlement_date=settlement_date or datetime(2026, 2, 10, tzinfo=UTC),
+        settlement_date=settlement_date or datetime.now(UTC) - timedelta(days=10),
         actual_high_f=actual_high_f,
         source="NWS_CLI",
     )
@@ -70,7 +70,7 @@ def _make_prediction(
     ]
     return Prediction(
         city=CityEnum(city),
-        prediction_date=prediction_date or datetime(2026, 2, 10, tzinfo=UTC),
+        prediction_date=prediction_date or datetime.now(UTC) - timedelta(days=10),
         brackets_json=brackets or default_brackets,
         ensemble_mean_f=56.3,
         ensemble_std_f=2.1,
@@ -96,7 +96,7 @@ class TestGetAccuracySources:
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
         """Returns source accuracy when matching data exists."""
-        dt = datetime(2026, 2, 10, tzinfo=UTC)
+        dt = datetime.now(UTC) - timedelta(days=10)
         fc = _make_forecast(city="NYC", source="NWS", forecast_date=dt, forecast_high_f=55.0)
         st = _make_settlement(city="NYC", settlement_date=dt, actual_high_f=57.0)
         db.add(fc)
@@ -211,7 +211,7 @@ class TestGetAccuracyTrends:
 
     async def test_with_data(self, client: AsyncClient, db: AsyncSession) -> None:
         """Returns trend data when matching forecast/settlement exists."""
-        dt = datetime(2026, 2, 10, tzinfo=UTC)
+        dt = datetime.now(UTC) - timedelta(days=10)
         fc = _make_forecast(city="NYC", source="NWS", forecast_date=dt, forecast_high_f=55.0)
         st = _make_settlement(city="NYC", settlement_date=dt, actual_high_f=57.0)
         db.add(fc)
@@ -266,7 +266,7 @@ def _make_settled_trade(
         user_id=user_id,
         kalshi_order_id=f"order-{uuid4().hex[:8]}",
         city=CityEnum(city),
-        trade_date=datetime(2026, 2, 10, tzinfo=UTC),
+        trade_date=datetime.now(UTC) - timedelta(days=10),  # within 90-day lookback
         market_ticker=f"KXHIGH{city}-26FEB10-B3",
         bracket_label="55-56°F",
         side=side,
@@ -279,7 +279,7 @@ def _make_settled_trade(
         status=status,
         pnl_cents=75 if status == TradeStatus.WON else -25,
         fees_cents=2,
-        settled_at=datetime(2026, 2, 11, tzinfo=UTC),
+        settled_at=datetime.now(UTC) - timedelta(days=9),
     )
 
 

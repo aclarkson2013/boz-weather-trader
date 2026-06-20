@@ -178,27 +178,27 @@ class TestKalshiClientMethods:
             yes_price=22,
         )
 
+        # v2 endpoint returns a flat sparse body, not the legacy {"order": {...}}.
         mock_response = _make_response(
-            200,
+            201,
             json_data={
-                "order": {
-                    "order_id": "abc-123",
-                    "ticker": "KXHIGHNY-26FEB18-T52",
-                    "action": "buy",
-                    "side": "yes",
-                    "type": "limit",
-                    "count": 1,
-                    "yes_price": 22,
-                    "status": "resting",
-                    "created_time": "2026-02-17T10:05:00Z",
-                }
+                "order_id": "abc-123",
+                "client_order_id": "test-client-id",
+                "fill_count": "0.00",
+                "remaining_count": "1.00",
+                "ts_ms": 1781889243000,
             },
         )
         client.client.request = AsyncMock(return_value=mock_response)
 
         response = await client.place_order(order)
         assert response.order_id == "abc-123"
+        # No fills + remaining count > 0 → resting
         assert response.status == "resting"
+        # The legacy fields downstream code reads are synthesized from the request
+        assert response.ticker == "KXHIGHNY-26FEB18-T52"
+        assert response.side == "yes"
+        assert response.yes_price == 22
 
     @pytest.mark.asyncio
     async def test_place_order_rejects_empty_ticker(self, client) -> None:

@@ -387,8 +387,8 @@ class TestOrderRequest:
                 yes_price=100,
             )
 
-    def test_to_api_dict_returns_correct_dict(self) -> None:
-        """to_api_dict returns the correct dict for the Kalshi API."""
+    def test_to_api_dict_yes_side_maps_to_bid(self) -> None:
+        """Buying YES becomes side=bid with the YES price in fixed-point dollars."""
         order = OrderRequest(
             ticker="KXHIGHNY-26FEB18-T52",
             action="buy",
@@ -400,11 +400,32 @@ class TestOrderRequest:
         api_dict = order.to_api_dict()
         assert api_dict == {
             "ticker": "KXHIGHNY-26FEB18-T52",
-            "action": "buy",
-            "side": "yes",
-            "type": "limit",
-            "count": 3,
-            "yes_price": 45,
+            "side": "bid",
+            "count": "3.00",
+            "price": "0.4500",
+            "time_in_force": "good_till_canceled",
+            "self_trade_prevention_type": "taker_at_cross",
+        }
+
+    def test_to_api_dict_no_side_maps_to_ask_with_complementary_price(self) -> None:
+        """Buying NO at X cents becomes side=ask at (100-X)/100 dollars."""
+        order = OrderRequest(
+            ticker="KXHIGHMIA-26JUN20-B92.5",
+            action="buy",
+            side="no",
+            type="limit",
+            count=1,
+            yes_price=42,  # this means "pay 42c for NO"
+        )
+        api_dict = order.to_api_dict()
+        # 100 - 42 = 58 → "0.5800"
+        assert api_dict == {
+            "ticker": "KXHIGHMIA-26JUN20-B92.5",
+            "side": "ask",
+            "count": "1.00",
+            "price": "0.5800",
+            "time_in_force": "good_till_canceled",
+            "self_trade_prevention_type": "taker_at_cross",
         }
 
     def test_validate_for_submission_raises_on_empty_ticker(self) -> None:
@@ -492,6 +513,82 @@ class TestOrderResponseDollarsConversion:
         assert response.yes_price == 22
         assert response.taker_fees == 11
         assert response.taker_fill_cost == 22
+
+
+class TestOrderResponseFromV2PlaceResponse:
+    """Tests for the OrderResponse.from_v2_place_response constructor."""
+
+    def _yes_request(self, **overrides):
+        from backend.kalshi.models import OrderRequest
+
+        defaults = {
+            "ticker": "KXHIGHNY-26FEB18-T52",
+            "action": "buy",
+            "side": "yes",
+            "type": "limit",
+            "count": 2,
+            "yes_price": 22,
+        }
+        defaults.update(overrides)
+        return OrderRequest(**defaults)
+
+    def test_resting_when_no_fills(self) -> None:
+        body = {
+            "order_id": "abc-123",
+            "fill_count": "0.00",
+            "remaining_count": "2.00",
+            "ts_ms": 1781889243000,
+        }
+        resp = OrderResponse.from_v2_place_response(body, self._yes_request())
+        assert resp.order_id == "abc-123"
+        assert resp.status == "resting"
+        assert resp.fill_count == 0
+        assert resp.initial_count == 2
+
+    def test_executed_when_fully_filled(self) -> None:
+        body = {
+            "order_id": "xyz-789",
+            "fill_count": "2.00",
+            "remaining_count": "0.00",
+            "ts_ms": 1781889243000,
+            "average_fill_price": "0.2200",
+            "average_fee_paid": "0.0100",
+        }
+        resp = OrderResponse.from_v2_place_response(body, self._yes_request())
+        assert resp.status == "executed"
+        assert resp.fill_count == 2
+        # avg fill price 0.22 × 2 contracts × 100 cents/dollar = 44 cents total
+        assert resp.taker_fill_cost == 44
+        # avg fee 0.01 × 2 contracts × 100 = 2 cents total
+        assert resp.taker_fees == 2
+
+    def test_partial_fill_treated_as_executed(self) -> None:
+        body = {
+            "order_id": "abc-456",
+            "fill_count": "1.00",
+            "remaining_count": "1.00",
+            "ts_ms": 1781889243000,
+            "average_fill_price": "0.2200",
+        }
+        resp = OrderResponse.from_v2_place_response(body, self._yes_request())
+        # remainder will be cancelled by _sync_resting_orders next cycle
+        assert resp.status == "executed"
+        assert resp.fill_count == 1
+        assert resp.initial_count == 2
+
+    def test_synthesizes_missing_fields_from_request(self) -> None:
+        body = {
+            "order_id": "abc-123",
+            "fill_count": "0.00",
+            "remaining_count": "2.00",
+        }
+        req = self._yes_request(ticker="KXHIGHMIA-26JUN20-B92.5", side="no", yes_price=42)
+        resp = OrderResponse.from_v2_place_response(body, req)
+        # Legacy-semantic fields populated from the request, not the response
+        assert resp.ticker == "KXHIGHMIA-26JUN20-B92.5"
+        assert resp.side == "no"
+        assert resp.action == "buy"
+        assert resp.yes_price == 42
 
 
 # ─── Position & Settlement Models ───

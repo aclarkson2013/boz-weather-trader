@@ -200,7 +200,9 @@ class KalshiClient:
                 context={"path": path, "retry_after": retry_after},
             )
 
-        if response.status_code == 400 and "/portfolio/orders" in path:
+        if response.status_code == 400 and (
+            "/portfolio/orders" in path or "/portfolio/events/orders" in path
+        ):
             try:
                 body = response.json()
             except Exception:
@@ -356,13 +358,16 @@ class KalshiClient:
         # Run explicit pre-flight validation
         order.validate_for_submission()
 
+        # v2 endpoint, single-book payload. The legacy /portfolio/orders path
+        # returns HTTP 410 (deprecated_v1_order_endpoint) as of June 2026.
         data = await self._request(
             "POST",
-            "/portfolio/orders",
+            "/portfolio/events/orders",
             json_data=order.to_api_dict(),
         )
 
-        response = OrderResponse(**data.get("order", {}))
+        # v2 returns a flat body, not {"order": {...}}.
+        response = OrderResponse.from_v2_place_response(data, order)
 
         logger.info(
             "Order placed",
