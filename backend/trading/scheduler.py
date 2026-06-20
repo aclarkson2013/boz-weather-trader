@@ -39,6 +39,15 @@ from backend.websocket.events import publish_event_safe, publish_event_sync
 logger = get_logger("TRADING")
 ET = ZoneInfo("America/New_York")
 
+# Resting orders that have been on Kalshi for longer than this are actively
+# cancelled by _sync_resting_orders. Restores the auto-expiry behavior the
+# old expiration_ts model provided before the v1.9.8 v2-endpoint migration
+# (which uses time_in_force=good_till_canceled and so has no per-order
+# expiry). 14 minutes matches the previous RESTING_EXPIRY_SECONDS in
+# executor.py and stays under the 15-minute trading cycle interval so a
+# stale order never overlaps with a new one for the same bracket.
+RESTING_MAX_AGE_SECONDS = 14 * 60
+
 
 # ─── Celery Tasks ───
 
@@ -823,7 +832,49 @@ async def _sync_resting_orders(
                     },
                 )
 
-            # If still "resting", leave as-is (will expire on Kalshi eventually)
+            else:
+                # Still "resting" on Kalshi. With v2 time_in_force=
+                # good_till_canceled, the order never auto-expires; we
+                # must actively cancel it once it's older than the
+                # configured resting window. This restores the v1.9.7
+                # behavior the v1.9.8 endpoint migration regressed.
+                created_at = trade.created_at
+                if created_at is not None and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                now = datetime.now(UTC)
+                age_seconds = (now - created_at).total_seconds() if created_at else 0.0
+
+                if age_seconds >= RESTING_MAX_AGE_SECONDS:
+                    try:
+                        await kalshi_client.cancel_order(trade.kalshi_order_id)
+                    except Exception as cancel_exc:
+                        # Don't crash the cycle on a cancel failure — the
+                        # order will be retried on the next sync.
+                        logger.warning(
+                            "Failed to cancel stale resting order",
+                            extra={
+                                "data": {
+                                    "trade_id": trade.id,
+                                    "order_id": trade.kalshi_order_id,
+                                    "age_s": round(age_seconds, 1),
+                                    "error": str(cancel_exc),
+                                }
+                            },
+                        )
+                    else:
+                        await session.delete(trade)
+                        transitioned += 1
+                        RESTING_ORDER_SYNCED_TOTAL.labels(outcome="expired").inc()
+                        logger.info(
+                            "Resting order cancelled — exceeded max age",
+                            extra={
+                                "data": {
+                                    "trade_id": trade.id,
+                                    "order_id": trade.kalshi_order_id,
+                                    "age_s": round(age_seconds, 1),
+                                }
+                            },
+                        )
 
         except Exception as exc:
             RESTING_ORDER_SYNCED_TOTAL.labels(outcome="error").inc()
