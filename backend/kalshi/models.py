@@ -21,7 +21,7 @@ Usage:
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -252,23 +252,39 @@ class OrderRequest(BaseModel):
             raise ValueError(msg)
 
     def to_api_dict(self) -> dict:
-        """Convert to the dict format expected by the Kalshi POST /portfolio/orders API.
+        """Convert to the dict format for the Kalshi v2 POST /portfolio/events/orders API.
+
+        The v2 endpoint uses a single-book bid/ask model with fixed-point dollar
+        strings, not the legacy yes/no + cent-integer model. We translate:
+
+        - Buy YES at X cents  → side="bid",  price="{X/100:.4f}"
+        - Buy NO  at X cents  → side="ask",  price="{(100-X)/100:.4f}"
+            (selling YES at the complementary price is economically identical to
+            buying NO at X — Kalshi's matching engine handles the position.)
+
+        time_in_force is hardcoded to "good_till_canceled" because the v2 API
+        no longer supports a per-order expiration_ts; the trading scheduler's
+        _sync_resting_orders() cancels stale resting orders every 15 minutes
+        which preserves the previous 14-min auto-expiry behavior.
 
         Returns:
-            Dict with keys: ticker, action, side, type, count, yes_price,
-            and optionally expiration_ts.
+            Dict with the v2 payload.
         """
-        d = {
+        if self.side == "yes":
+            v2_side = "bid"
+            yes_side_cents = self.yes_price
+        else:
+            v2_side = "ask"
+            yes_side_cents = 100 - self.yes_price
+
+        return {
             "ticker": self.ticker,
-            "action": self.action,
-            "side": self.side,
-            "type": self.type,
-            "count": self.count,
-            "yes_price": self.yes_price,
+            "side": v2_side,
+            "count": f"{self.count}.00",
+            "price": f"{yes_side_cents / 100:.4f}",
+            "time_in_force": "good_till_canceled",
+            "self_trade_prevention_type": "taker_at_cross",
         }
-        if self.expiration_ts is not None:
-            d["expiration_ts"] = self.expiration_ts
-        return d
 
 
 class OrderResponse(BaseModel):
@@ -343,6 +359,88 @@ class OrderResponse(BaseModel):
     def count(self) -> int:
         """Backward-compatible count property (returns fill_count)."""
         return self.fill_count
+
+    @classmethod
+    def from_v2_place_response(cls, body: dict, request: OrderRequest) -> OrderResponse:
+        """Construct an OrderResponse from the v2 POST /portfolio/events/orders body.
+
+        The v2 response is much sparser than the legacy one — it returns only
+        ``order_id``, ``client_order_id``, ``fill_count``, ``remaining_count``,
+        ``ts_ms``, and (only when filled) ``average_fill_price`` /
+        ``average_fee_paid``. The other fields downstream code reads (ticker,
+        side, yes_price, action, type, status, created_time, taker_fill_cost,
+        taker_fees) we synthesize from the request we just sent and the
+        partial response.
+
+        Args:
+            body: Parsed JSON body from the v2 endpoint.
+            request: The OrderRequest we sent — used to fill missing fields
+                with their original (legacy-semantic) values.
+
+        Returns:
+            An OrderResponse with the same shape downstream code expects.
+        """
+
+        # Counts come back as fixed-point strings ("10.00") on the new API.
+        def _to_int(value: object, default: int = 0) -> int:
+            if value is None:
+                return default
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return default
+
+        fill_count = _to_int(body.get("fill_count"), 0)
+        remaining_count = _to_int(body.get("remaining_count"), 0)
+        initial_count = fill_count + remaining_count
+
+        # Derive a legacy-style status from the count split.
+        if fill_count == 0 and remaining_count > 0:
+            status = "resting"
+        elif remaining_count == 0 and fill_count > 0:
+            status = "executed"
+        elif fill_count > 0 and remaining_count > 0:
+            # Treat partial fills as executed; the resting remainder will be
+            # cancelled by _sync_resting_orders on the next cycle.
+            status = "executed"
+        else:
+            # 0/0 — rare; treat as resting so callers handle it as unfilled.
+            status = "resting"
+
+        # average_fill_price and average_fee_paid are dollar strings, present
+        # only when at least one contract has filled.
+        avg_fill_dollars = body.get("average_fill_price")
+        avg_fee_dollars = body.get("average_fee_paid")
+        taker_fill_cost_cents = 0
+        taker_fees_cents = 0
+        if fill_count > 0 and avg_fill_dollars is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                taker_fill_cost_cents = int(round(float(avg_fill_dollars) * 100 * fill_count))
+        if fill_count > 0 and avg_fee_dollars is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                taker_fees_cents = int(round(float(avg_fee_dollars) * 100 * fill_count))
+
+        # Build created_time from ts_ms if present, otherwise "now".
+        ts_ms = body.get("ts_ms")
+        if isinstance(ts_ms, (int, float)) and ts_ms > 0:
+            created = datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC)
+        else:
+            created = datetime.now(UTC)
+
+        return cls(
+            order_id=str(body.get("order_id", "")),
+            ticker=request.ticker,
+            action=request.action,
+            side=request.side,
+            type=request.type,
+            fill_count=fill_count,
+            initial_count=initial_count if initial_count > 0 else request.count,
+            yes_price=request.yes_price,
+            status=status,
+            created_time=created,
+            taker_fees=taker_fees_cents,
+            taker_fill_cost=taker_fill_cost_cents,
+        )
 
 
 # ─── Position & Settlement Models ───

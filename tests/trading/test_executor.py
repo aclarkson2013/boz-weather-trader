@@ -449,10 +449,15 @@ class TestExecuteTrade:
         assert order_arg.expiration_ts > 0
 
     @pytest.mark.asyncio
-    async def test_expiration_ts_in_api_dict(
+    async def test_api_dict_uses_good_till_canceled_tif(
         self, sample_signal: TradeSignal, mock_db: AsyncMock, mock_kalshi_client: AsyncMock
     ) -> None:
-        """The expiration_ts field appears in the to_api_dict() output."""
+        """The v2 payload uses time_in_force=good_till_canceled (no expiration_ts).
+
+        The v2 API dropped per-order expiry; we rely on _sync_resting_orders
+        to cancel stale resting orders each 15-minute trading cycle to
+        preserve the previous auto-expiry behavior.
+        """
         await execute_trade(
             signal=sample_signal,
             kalshi_client=mock_kalshi_client,
@@ -462,8 +467,8 @@ class TestExecuteTrade:
 
         order_arg = mock_kalshi_client.place_order.call_args[0][0]
         api_dict = order_arg.to_api_dict()
-        assert "expiration_ts" in api_dict
-        assert api_dict["expiration_ts"] > 0
+        assert "expiration_ts" not in api_dict
+        assert api_dict["time_in_force"] == "good_till_canceled"
 
 
 class TestNoSidePriceCents:
