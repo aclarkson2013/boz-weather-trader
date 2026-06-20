@@ -429,7 +429,14 @@ class KalshiClient:
         return all_orders
 
     async def cancel_order(self, order_id: str) -> bool:
-        """Cancel a resting order.
+        """Cancel a resting order via the Kalshi v2 cancel endpoint.
+
+        Kalshi deprecated DELETE /portfolio/orders/{id} alongside the v1
+        order create endpoint (changelog window June 18–25, 2026). The
+        v2 path is otherwise identical — same DELETE method, same
+        order_id in the path, no request body. The response shape did
+        change ({order_id, client_order_id, reduced_by, ts_ms} instead
+        of a full order object), but we don't read it.
 
         Args:
             order_id: The Kalshi order ID to cancel.
@@ -437,7 +444,7 @@ class KalshiClient:
         Returns:
             True if cancelled successfully.
         """
-        await self._request("DELETE", f"/portfolio/orders/{order_id}")
+        await self._request("DELETE", f"/portfolio/events/orders/{order_id}")
         logger.info(
             "Order cancelled",
             extra={"data": {"order_id": order_id}},

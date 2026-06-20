@@ -216,6 +216,52 @@ class TestKalshiClientMethods:
             await client.place_order(order)
 
 
+class TestCancelOrderV2:
+    """Tests for cancel_order using the Kalshi v2 path."""
+
+    @pytest.fixture
+    def client(self, rsa_key_pair):
+        c = KalshiClient(
+            api_key_id=rsa_key_pair["api_key_id"],
+            private_key_pem=rsa_key_pair["private_key_pem"],
+            demo=True,
+        )
+        c.rate_limiter.acquire = AsyncMock()
+        return c
+
+    @pytest.mark.asyncio
+    async def test_cancel_hits_v2_path(self, client) -> None:
+        """cancel_order must POST DELETE to /portfolio/events/orders/{id}.
+
+        Kalshi deprecated /portfolio/orders/{id} alongside the v1 create
+        endpoint (changelog window June 18–25, 2026).
+        """
+        mock_response = _make_response(
+            200,
+            json_data={
+                "order_id": "abc-123",
+                "client_order_id": "cli-id",
+                "reduced_by": "1.00",
+                "ts_ms": 1781889243000,
+            },
+        )
+        client.client.request = AsyncMock(return_value=mock_response)
+
+        result = await client.cancel_order("abc-123")
+
+        assert result is True
+        # The URL the underlying httpx request was called with must end
+        # with the v2 path. We assert on the call args rather than mocking
+        # _request so the path translation is actually exercised.
+        called_url = client.client.request.call_args.args[1]
+        assert called_url.endswith("/portfolio/events/orders/abc-123")
+        assert "/portfolio/orders/abc-123" not in called_url.replace(
+            "/portfolio/events/orders/", ""
+        )
+        # And the HTTP method must still be DELETE
+        assert client.client.request.call_args.args[0] == "DELETE"
+
+
 class TestGetOrdersPagination:
     """Tests for get_orders cursor-based pagination."""
 
