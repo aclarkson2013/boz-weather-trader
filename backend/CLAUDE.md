@@ -4,6 +4,8 @@
 
 The backend is a Python FastAPI application. All backend modules live under `backend/`. Shared code (schemas, config, database, logging) lives in `backend/common/`.
 
+> **Before changing prediction (`prediction/`) or trading (`trading/`) logic:** read `docs/ALGO_CHANGELOG.md` (repo root `docs/`) — it records every past change to how the bot predicts/decides trades and its measured performance impact. Add a row there when your change alters prediction/probability/EV/sizing/risk/execution behavior.
+
 ## Python Standards
 
 - **Version:** Python 3.11+

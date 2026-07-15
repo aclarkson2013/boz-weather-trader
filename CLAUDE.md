@@ -6,6 +6,8 @@ Boz Weather Trader is a free, open-source automated trading bot for Kalshi weath
 
 **PRD:** See `PRD.md` for the full product requirements document (v0.5+).
 
+**Algo history & performance:** See `docs/ALGO_CHANGELOG.md` for the running history of every change to *how the bot predicts and decides trades* (prediction pipeline, probability model, EV/risk logic, order execution), each paired with its measured live-performance effect, plus dated performance reviews. **Read it before modifying prediction or trading logic, and before any performance review. Update it whenever a change alters prediction/probability/EV/sizing/risk/execution behavior, and append a snapshot whenever a performance review is run.**
+
 ## Architecture Overview
 
 ```
