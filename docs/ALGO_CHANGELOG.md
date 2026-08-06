@@ -21,6 +21,10 @@
   review. The July watch item is now confirmed as a real problem, not noise.
 - **Fix shipped (2026-08-06):** v1.9.12 corrects the bracket-bounds bug behind items 1–3 below and
   resets the calibration layer; trading narrowed to NYC only while we watch the post-fix EV gap.
+- **DEPLOYED 2026-08-06 ~21:12 UTC** (v1.9.13, first fixed prediction cycle 21:35 UTC). Era E for
+  future reviews starts at event date **2026-08-07**. Verified live: 2°F bounds stored, top label
+  corrected, probabilities match the fixed t-CDF exactly (AUS bottom catch-all 15.1%→5.2%), stale
+  calibration ignored ("using identity until refit").
 - **Active problems (2026-08-06, pre-v1.9.12):**
   1. Last 10 days (Jul 27–Aug 5): 34.8% win rate, −$10.78, EV gap −38pp. Model is under-forecasting
      peak summer highs (AUS 100°F+, NYC 83–84°F) and losing NO bets on brackets the market prices
