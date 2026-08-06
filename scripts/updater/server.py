@@ -24,6 +24,11 @@ UPDATER_SECRET = os.environ.get("UPDATER_SECRET", "changeme")
 STATUS_FILE = "/tmp/update_status.json"
 PORT = 9999
 
+# Update timeout. The old 600s default killed real updates mid-build:
+# a cold backend build plus the frontend buildx build routinely exceeds
+# 10 minutes on homelab hardware (observed 2026-08-06, v1.9.12 deploy).
+UPDATE_TIMEOUT_SECONDS = int(os.environ.get("UPDATE_TIMEOUT_SECONDS", "1800"))
+
 # Global lock to prevent concurrent updates
 _update_lock = threading.Lock()
 
@@ -45,7 +50,7 @@ def _run_update() -> None:
             ["/updater/update.sh"],
             capture_output=True,
             text=True,
-            timeout=600,  # 10 minute timeout
+            timeout=UPDATE_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             logger.error(
@@ -58,12 +63,12 @@ def _run_update() -> None:
             logger.info("Update completed successfully")
             logger.info("stdout: %s", result.stdout[-500:] if result.stdout else "")
     except subprocess.TimeoutExpired:
-        logger.error("Update timed out after 600 seconds")
+        logger.error("Update timed out after %d seconds", UPDATE_TIMEOUT_SECONDS)
         # Write error status
         status = {
             "status": "error",
             "step": "timeout",
-            "error": "Update timed out after 10 minutes",
+            "error": f"Update timed out after {UPDATE_TIMEOUT_SECONDS // 60} minutes",
             "started_at": datetime.now(UTC).isoformat(),
         }
         with open(STATUS_FILE, "w") as f:

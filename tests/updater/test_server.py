@@ -172,3 +172,65 @@ class TestGetStatus:
             handler.do_GET()
 
         assert handler.response_code == 404
+
+
+class TestUpdateTimeout:
+    """Tests for the configurable update timeout (v1.9.13)."""
+
+    def test_default_timeout_is_thirty_minutes(self):
+        """Default must be 1800s — the old 600s killed real deploys
+        mid-build (backend + frontend routinely exceed 10 min on
+        homelab hardware)."""
+        assert updater_server.UPDATE_TIMEOUT_SECONDS == 1800
+
+    def test_timeout_is_env_configurable(self):
+        """UPDATE_TIMEOUT_SECONDS env var overrides the default."""
+        import importlib
+
+        with patch.dict(os.environ, {"UPDATE_TIMEOUT_SECONDS": "2400"}):
+            importlib.reload(updater_server)
+            assert updater_server.UPDATE_TIMEOUT_SECONDS == 2400
+        # Restore module state for other tests
+        importlib.reload(updater_server)
+
+    def test_run_update_uses_configured_timeout(self):
+        """subprocess.run must receive the configured timeout."""
+        with (
+            patch.object(updater_server, "_update_lock") as mock_lock,
+            patch("server.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            updater_server._run_update()
+
+        mock_lock.release.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["timeout"] == updater_server.UPDATE_TIMEOUT_SECONDS
+
+
+class TestUpdateScript:
+    """Static checks on update.sh (no docker available in tests)."""
+
+    SCRIPT = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "updater", "update.sh")
+
+    def _read(self) -> str:
+        with open(self.SCRIPT, encoding="utf-8") as f:
+            return f.read()
+
+    def test_backend_build_does_not_use_no_cache(self):
+        """--no-cache burned ~6 min of every update window; layer cache
+        must stay enabled for the backend build."""
+        content = self._read()
+        assert "build --no-cache" not in content
+
+    def test_frontend_build_is_conditional_on_changes(self):
+        """The frontend buildx step must be skippable when frontend/ is
+        unchanged since the last successful deploy."""
+        content = self._read()
+        assert "FRONTEND_CHANGED" in content
+        assert "git diff --name-only" in content
+        assert "frontend/" in content
+
+    def test_records_deployed_commit_on_success(self):
+        """A successful run must record HEAD for next-run change detection."""
+        content = self._read()
+        assert ".updater_last_deployed" in content

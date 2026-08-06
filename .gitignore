@@ -53,3 +53,6 @@ logs/
 
 # Trained model artifacts (persisted via Docker volume in production)
 models/
+
+# Updater deploy marker (written by scripts/updater/update.sh on the host)
+.updater_last_deployed
