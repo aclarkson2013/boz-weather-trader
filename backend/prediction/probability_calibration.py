@@ -38,6 +38,12 @@ logger = get_logger("MODEL")
 
 CALIBRATION_FILENAME = "probability_calibration.json"
 
+# Version of the bracket-bounds parsing the curves were fitted against.
+# v2 = continuous half-degree bounds (v1.9.12 fix for the 1°F-wide middle
+# bracket bug). Files saved before this field existed (or with an older
+# version) are ignored on load so stale curves can't double-correct.
+BOUNDS_VERSION = 2
+
 # Cities that participate in calibration. Kept in sync with CityEnum.
 SUPPORTED_CITIES: tuple[str, ...] = ("NYC", "CHI", "MIA", "AUS")
 
@@ -130,6 +136,21 @@ def load_calibration(model_dir: str = "models") -> dict[str, dict] | None:
         if not path.exists():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("bounds_version") != BOUNDS_VERSION:
+            # Curves fitted on pre-v1.9.12 predictions learned to correct
+            # the 1°F-wide bracket-bounds bug; applying them to fixed
+            # probabilities would double-correct. Ignore and refit fresh.
+            logger.warning(
+                "Stale probability calibration (pre bounds fix) — using identity until refit",
+                extra={
+                    "data": {
+                        "path": str(path),
+                        "file_bounds_version": data.get("bounds_version"),
+                        "required_bounds_version": BOUNDS_VERSION,
+                    }
+                },
+            )
+            return None
         curves = data.get("curves")
         if isinstance(curves, dict) and len(curves) > 0:
             return curves
@@ -149,6 +170,7 @@ def save_calibration(curves: dict[str, dict], model_dir: str = "models") -> None
     payload = {
         "curves": curves,
         "computed_at": datetime.now(UTC).isoformat(),
+        "bounds_version": BOUNDS_VERSION,
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     logger.info(
@@ -164,6 +186,22 @@ def save_calibration(curves: dict[str, dict], model_dir: str = "models") -> None
 
 
 # ─── Fit ───────────────────────────────────────────────────────────────
+
+
+def _is_pre_bounds_fix_row(brackets: list[dict]) -> bool:
+    """Detect predictions stored with pre-v1.9.12 bracket bounds.
+
+    Old-format middle brackets carried raw Kalshi strikes and were ~1°F
+    wide (e.g. [89.0, 90.0]); fixed-format middles are ~2°F wide at the
+    half-degree (e.g. [88.5, 90.5]). Any middle bracket narrower than
+    1.5°F marks the whole prediction row as pre-fix.
+    """
+    for bracket in brackets:
+        lower = bracket.get("lower_bound_f")
+        upper = bracket.get("upper_bound_f")
+        if lower is not None and upper is not None and (upper - lower) < 1.5:
+            return True
+    return False
 
 
 async def _collect_pairs(
@@ -196,6 +234,11 @@ async def _collect_pairs(
         brackets = brackets_json
         if isinstance(brackets, str):
             brackets = json.loads(brackets)
+        if _is_pre_bounds_fix_row(brackets):
+            # Prediction stored before the v1.9.12 bracket-bounds fix:
+            # its probabilities were computed on 1°F-wide middle brackets.
+            # Training on them would re-learn the bug's distortion.
+            continue
         for bracket in brackets:
             prob = bracket.get("probability")
             if prob is None:

@@ -82,35 +82,47 @@ class TestParseBracketFromMarket:
     """Tests for parse_bracket_from_market function."""
 
     def test_bottom_edge_bracket(self) -> None:
-        """Bottom edge: floor=None, cap=47.99 produces '47°F or below'."""
+        """Bottom edge: floor=None, cap=47.99 produces '47°F or below'.
+
+        Continuous upper bound sits at the half-degree above the highest
+        covered integer (47 → 47.5).
+        """
         market = {"floor_strike": None, "cap_strike": 47.99, "ticker": "T48"}
         result = parse_bracket_from_market(market)
 
         assert result["label"] == "47°F or below"
         assert result["lower_bound_f"] is None
-        assert result["upper_bound_f"] == 47.99
+        assert result["upper_bound_f"] == 47.5
         assert result["is_edge_lower"] is True
         assert result["is_edge_upper"] is False
 
     def test_top_edge_bracket(self) -> None:
-        """Top edge: floor=58.0, cap=None produces '58°F or above'."""
+        """Top edge: integer floor is EXCLUSIVE (shared-boundary convention).
+
+        Kalshi encodes '>58°' as floor=58 with the display '59° or above'
+        (verified live: KXHIGHNY-26AUG07-T96 floor=96 displays
+        '97° or above'). Lowest covered integer is floor+1.
+        """
         market = {"floor_strike": 58.0, "cap_strike": None, "ticker": "T58"}
         result = parse_bracket_from_market(market)
 
-        assert result["label"] == "58°F or above"
-        assert result["lower_bound_f"] == 58.0
+        assert result["label"] == "59°F or above"
+        assert result["lower_bound_f"] == 58.5
         assert result["upper_bound_f"] is None
         assert result["is_edge_lower"] is False
         assert result["is_edge_upper"] is True
 
     def test_middle_bracket(self) -> None:
-        """Middle: floor=52.0, cap=53.99 produces '52° to 53°F'."""
+        """Middle: floor=52.0, cap=53.99 produces '52° to 53°F'.
+
+        Covers integer temps {52, 53} → continuous bounds [51.5, 53.5).
+        """
         market = {"floor_strike": 52.0, "cap_strike": 53.99, "ticker": "T52"}
         result = parse_bracket_from_market(market)
 
         assert result["label"] == "52° to 53°F"
-        assert result["lower_bound_f"] == 52.0
-        assert result["upper_bound_f"] == 53.99
+        assert result["lower_bound_f"] == 51.5
+        assert result["upper_bound_f"] == 53.5
         assert result["is_edge_lower"] is False
         assert result["is_edge_upper"] is False
 
@@ -205,10 +217,98 @@ class TestParseBracketFromMarket:
         assert result["label"] == "48°F or below"
 
     def test_post_migration_top_edge_integer_floor(self) -> None:
-        """Post-migration: floor=55, cap=None produces '55°F or above'."""
+        """Post-migration: floor=55 (exclusive) produces '56°F or above'.
+
+        Matches Kalshi's live display convention: the top catch-all's
+        floor_strike equals the last middle bracket's cap and is exclusive
+        (e.g. KXHIGHCHI-26AUG07 floor=89 → '90° or above').
+        """
         market = {"floor_strike": 55, "cap_strike": None, "ticker": "B55"}
         result = parse_bracket_from_market(market)
-        assert result["label"] == "55°F or above"
+        assert result["label"] == "56°F or above"
+        assert result["lower_bound_f"] == 55.5
+
+
+class TestContinuousBounds:
+    """Continuous half-degree bounds for CDF probability mass (v1.9.12 fix).
+
+    Middle brackets cover TWO integer temps, so their continuous bounds
+    must be 2°F wide. Passing raw Kalshi strikes through (pre-fix) made
+    them 1°F wide and systematically halved middle-bracket probabilities
+    (see docs/ALGO_CHANGELOG.md, 2026-08-06 review).
+
+    Fixture ladder mirrors the live KXHIGHNY-26AUG07 event.
+    """
+
+    LIVE_NYC_LADDER = [
+        {"floor_strike": None, "cap_strike": 89, "ticker": "T89"},  # 88° or below
+        {"floor_strike": 89, "cap_strike": 90, "ticker": "B89.5"},  # 89° to 90°
+        {"floor_strike": 91, "cap_strike": 92, "ticker": "B91.5"},  # 91° to 92°
+        {"floor_strike": 93, "cap_strike": 94, "ticker": "B93.5"},  # 93° to 94°
+        {"floor_strike": 95, "cap_strike": 96, "ticker": "B95.5"},  # 95° to 96°
+        {"floor_strike": 96, "cap_strike": None, "ticker": "T96"},  # 97° or above
+    ]
+
+    def test_live_ladder_labels_match_kalshi_display(self) -> None:
+        """Labels match Kalshi's own yes_sub_title values for this event."""
+        labels = [parse_bracket_from_market(m)["label"] for m in self.LIVE_NYC_LADDER]
+        assert labels == [
+            "88°F or below",
+            "89° to 90°F",
+            "91° to 92°F",
+            "93° to 94°F",
+            "95° to 96°F",
+            "97°F or above",
+        ]
+
+    def test_middle_brackets_are_two_degrees_wide(self) -> None:
+        """Every middle bracket spans 2.0°F of continuous temperature."""
+        for market in self.LIVE_NYC_LADDER[1:-1]:
+            result = parse_bracket_from_market(market)
+            width = result["upper_bound_f"] - result["lower_bound_f"]
+            assert width == 2.0, f"{result['label']} is {width}°F wide"
+
+    def test_bounds_tile_without_gaps(self) -> None:
+        """Adjacent bounds meet exactly — no phantom gaps between brackets."""
+        results = [parse_bracket_from_market(m) for m in self.LIVE_NYC_LADDER]
+        for prev, nxt in zip(results, results[1:], strict=False):
+            assert prev["upper_bound_f"] == nxt["lower_bound_f"], (
+                f"gap between {prev['label']} and {nxt['label']}"
+            )
+
+    def test_bounds_classify_integer_temps_correctly(self) -> None:
+        """Each integer temp falls inside exactly one bracket's bounds."""
+        results = [parse_bracket_from_market(m) for m in self.LIVE_NYC_LADDER]
+
+        def containing_label(temp: float) -> str:
+            for r in results:
+                lower = r["lower_bound_f"] if r["lower_bound_f"] is not None else float("-inf")
+                upper = r["upper_bound_f"] if r["upper_bound_f"] is not None else float("inf")
+                if lower <= temp < upper:
+                    return r["label"]
+            raise AssertionError(f"temp {temp} not covered")
+
+        assert containing_label(88) == "88°F or below"
+        assert containing_label(89) == "89° to 90°F"
+        assert containing_label(90) == "89° to 90°F"  # pre-fix: fell in a gap
+        assert containing_label(91) == "91° to 92°F"
+        assert containing_label(96) == "95° to 96°F"  # pre-fix: matched top bracket
+        assert containing_label(97) == "97°F or above"
+
+    def test_legacy_dot99_convention_same_bounds(self) -> None:
+        """Legacy .99-cap markets produce the same continuous bounds."""
+        legacy = {"floor_strike": 89.0, "cap_strike": 90.99, "ticker": "T89"}
+        integer = {"floor_strike": 89, "cap_strike": 90, "ticker": "B89.5"}
+        assert (
+            parse_bracket_from_market(legacy)["lower_bound_f"]
+            == parse_bracket_from_market(integer)["lower_bound_f"]
+            == 88.5
+        )
+        assert (
+            parse_bracket_from_market(legacy)["upper_bound_f"]
+            == parse_bracket_from_market(integer)["upper_bound_f"]
+            == 90.5
+        )
 
 
 # ─── Event Markets Parsing ───
@@ -279,12 +379,12 @@ class TestParseEventMarkets:
         # First bracket should be bottom edge
         assert brackets[0]["is_edge_lower"] is True
         assert brackets[0]["label"] == "47°F or below"
-        # Last bracket should be top edge
+        # Last bracket should be top edge (floor=58 exclusive → 59+)
         assert brackets[-1]["is_edge_upper"] is True
-        assert brackets[-1]["label"] == "58°F or above"
-        # Middle brackets sorted by lower_bound_f
-        assert brackets[1]["lower_bound_f"] == 52.0
-        assert brackets[2]["lower_bound_f"] == 54.0
+        assert brackets[-1]["label"] == "59°F or above"
+        # Middle brackets sorted by continuous lower_bound_f
+        assert brackets[1]["lower_bound_f"] == 51.5
+        assert brackets[2]["lower_bound_f"] == 53.5
 
     def test_adds_pricing_data_from_market(self) -> None:
         """parse_event_markets includes pricing data (yes_bid, yes_ask, etc.)."""

@@ -12,19 +12,44 @@
 > order-execution behavior, add a row. When we run a performance review, append a dated snapshot to
 > the *Performance Reviews* section.
 
-## Current state (as of last review 2026-07-15)
+## Current state (as of last review 2026-08-06)
 
 - **Deployed version:** v1.9.10 (homelab VM at `10.0.0.175`, live/`auto` mode, not demo)
 - **Verdict:** The **per-city probability calibration + Student-t error model (v1.9.6/v1.9.7,
-  shipped 2026-05-10)** is the change that turned the bot from consistently losing to profitable.
-  It fixed a systematic **overconfidence** problem: pre-calibration the model promised +9% EV while
-  realizing −11% ROI (a 20pp gap); post-calibration promised EV ≈ realized ROI within 0.2pp.
-- **Watch item:** After the Kalshi-v2 execution migration (v1.9.8–v1.9.10, 2026-06-20) the realized-
-  vs-promised EV gap re-widened to −5.4pp on a small sample. Possibly fill quality; re-check.
+  shipped 2026-05-10)** remains the change that turned the bot profitable (Era C: +6.6% ROI,
+  EV gap +0.2pp). However, the **post-Jun-20 era (D) has erased the edge** — see the 2026-08-06
+  review. The July watch item is now confirmed as a real problem, not noise.
+- **Fix shipped (2026-08-06):** v1.9.12 corrects the bracket-bounds bug behind items 1–3 below and
+  resets the calibration layer; trading narrowed to NYC only while we watch the post-fix EV gap.
+- **Active problems (2026-08-06, pre-v1.9.12):**
+  1. Last 10 days (Jul 27–Aug 5): 34.8% win rate, −$10.78, EV gap −38pp. Model is under-forecasting
+     peak summer highs (AUS 100°F+, NYC 83–84°F) and losing NO bets on brackets the market prices
+     ~50% that then hit.
+  2. The `high` confidence bucket is **anti-predictive** across all of Era D (~38% WR, −$18.85 over
+     155 trades) while `medium` is profitable (+$11.22). Under investigation.
+  3. 100% of Era D trades are NO-side — the 12% YES threshold + 15% YES floor shut off YES entirely.
 
 ---
 
 ## Change history (algo-affecting)
+
+### v1.9.12 — Fix bracket-bounds parsing + calibration reset (2026-08-06)
+- **Files:** `backend/kalshi/markets.py`, `backend/prediction/probability_calibration.py`
+- **What:** `parse_bracket_from_market` now emits **continuous half-degree bounds** matching
+  Kalshi's shared-boundary integer-strike convention: middles cover two integer temps
+  ([88.5, 90.5) for "89° to 90°"), the bottom cap and top floor are exclusive shared boundaries,
+  and the top catch-all label is corrected (+1: floor=96 → "97°F or above", matching Kalshi's
+  display). `parse_event_markets` warns if the parsed ladder ever stops tiling (guard against
+  future convention changes). Calibration: curves are stamped with `bounds_version`; files fitted
+  pre-fix are ignored on load (identity until refit), and the fit skips stored predictions with
+  pre-fix 1°F-wide brackets so curves retrain only on clean data.
+- **Why:** Root cause of the Era D bleed — raw strikes passed straight to the CDF made middle
+  brackets 1°F wide with phantom gaps, roughly halving middle-bracket model probabilities and
+  driving perpetual "model ~20% vs market ~50%" NO bets. See the 2026-08-06 review below.
+- **Expected effect:** middle-bracket probabilities roughly double → most fade-the-favorite NO
+  signals stop clearing the 6% EV threshold; trade count should drop sharply and the promised-EV
+  vs realized-ROI gap should close. Also deployed alongside: active_cities reduced to NYC only
+  (the one city where the model beats the market per `/api/accuracy/edge`).
 
 ### v1.9.7 — Student-t error distribution + full-pipeline error std (2026-05-10)
 - **Files:** `backend/prediction/error_dist.py`, `backend/prediction/brackets.py`,
@@ -69,6 +94,55 @@
 ---
 
 ## Performance Reviews
+
+### 2026-08-06 — last-month deep dive (Period D watch item CONFIRMED)
+
+Analysis of **2,957 settled trades**; focus on Jul 7 – Aug 5. Codebase unchanged since Jun 20
+(v1.9.10), so all drift below happened on constant code. Balance fell $97.27 → $78.06 since Jul 15.
+
+| Window | Trades | Win rate | P&L | ROI | EV gap |
+|---|--:|--:|--:|--:|--:|
+| Jul 7 – Jul 26 | 177 | 50.8% | +$1.50 | +1.8% | −4.7pp |
+| **Jul 27 – Aug 5 (last 10 days)** | 69 | **34.8%** | **−$10.78** | **−32.0%** | **−38.4pp** |
+| Era C (May 10 – Jun 19, calibration) | 655 | 60.2% | +$23.86 | +6.6% | +0.2pp |
+| Era D (Jun 20 – now, updated) | 468 | 48.7% | −$7.63 | −3.4% | −9.8pp |
+
+**Findings:**
+1. **Losing-trade signature:** NO bets at ~50¢ where model says ~20% but market says ~50%, and the
+   bracket **hits** (e.g. Aug 4 AUS 100–101°F: model 18%, market 54%, actual 100°F). The model is
+   under-forecasting peak summer highs; the market is right on these coin-flips.
+2. **Confidence label inverted (all of Era D):** `high` = 155 trades, ~38% WR, −$18.85;
+   `medium` = 313 trades, ~54% WR, +$11.22. Skipping `high` trades would have made Era D profitable.
+3. **All 468 Era D trades are NO-side.** YES thresholds (12% EV + 15% market floor) shut YES off.
+4. AUS worst recently (last 10d: −$7.68 @ 29.7% WR); NYC also flipped negative.
+
+**Root-cause investigation (same day):**
+
+1. **BUG FOUND — bracket bounds parsing (`kalshi/markets.py: parse_bracket_from_market`).**
+   Kalshi sends *integer* cap strikes for these markets (e.g. floor 89.0 / cap 90.0 for
+   "89° to 90°F", which covers integer temps 89 **and** 90 ≈ continuous [88.5, 90.5)). The parser
+   passes floor/cap straight through as CDF bounds, so middle brackets are treated as **1°F wide
+   instead of 2°F** with phantom gaps between brackets. Verified numerically: recomputing the live
+   NYC log line (mean 90.1, std 1.94, df 10) with the buggy 1°-wide bounds reproduces the logged
+   probabilities almost exactly ([0.252, 0.230, 0.320, 0.153, 0.035] vs logged
+   [0.248, 0.227, 0.316, 0.151, 0.034]); no plausible correct-bounds distribution does.
+   Effect: middle-bracket model probabilities are roughly **halved** before normalization → the
+   engine sees "model ~20% vs market ~50%" on nearly every mid-priced bracket → all-NO strategy
+   fading the market favorite. Feb 24 commit `bb84e9c` fixed the *label* for integer caps but never
+   the CDF bounds. The bug is **chronic** (weekly avg model-prob on these trades has been 17–26%
+   all along) — Era C's profit came from volatile spring weather where fading the favorite won
+   anyway; stable summer weather turned the same structural bet into a bleed.
+2. **Confidence inversion explained — it's one cell.** Era D high-conf: AUS N=94 WR 31% −$18.38;
+   all other high-conf cells ≈ breakeven (NYC −$0.02, CHI +$0.03, MIA −$0.48). AUS-medium is the
+   *best* cell (+$7.39, 70% WR). "High" = tight forecast spread + low summer std → concentrates on
+   stable AUS extreme-heat days, where the distorted model keeps fading 100°F+ brackets that hit.
+   The label is a regime proxy, not a causal defect.
+3. **Refits ARE running.** TrainingReports #105–107 (Jul 31, Aug 2, Aug 6) all completed: 3 models
+   accepted, source weights updated, calibration refit in-task (`train_models.py` Step 4b) and
+   caches invalidated (Step 6). Rolling bias live (+0.92°F NYC on Aug 6). Stored predictions show
+   isotonic plateaus (e.g. three brackets at 0.0076) — calibration is being applied. Not the cause.
+4. **Model edge report** (`/api/accuracy/edge`, N=1199): market Brier beats model in MIA (−0.056),
+   AUS (−0.059), CHI (−0.015); model beats market only in NYC (+0.052).
 
 ### 2026-07-15 — first tracked review (baseline)
 
