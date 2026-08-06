@@ -9,10 +9,12 @@ import numpy as np
 import pytest
 
 from backend.prediction.probability_calibration import (
+    BOUNDS_VERSION,
     CALIBRATION_FILENAME,
     MIN_SAMPLES_PER_CITY,
     SUPPORTED_CITIES,
     _identity_curve,
+    _is_pre_bounds_fix_row,
     apply_calibration,
     fit_all_cities,
     fit_calibration,
@@ -33,14 +35,18 @@ def _mock_session_with_rows(rows: list) -> AsyncMock:
 
 
 def _brackets_with_probs(probs: list[float]) -> list[dict]:
-    """Build 6 bracket dicts with the given probabilities."""
+    """Build 6 bracket dicts with the given probabilities.
+
+    Uses post-v1.9.12 continuous half-degree bounds (2°F-wide middles);
+    rows with pre-fix 1°F-wide middles are skipped by the fit.
+    """
     bounds: list[tuple[float | None, float | None]] = [
-        (None, 52.0),
-        (53.0, 54.0),
-        (55.0, 56.0),
-        (57.0, 58.0),
-        (59.0, 60.0),
-        (61.0, None),
+        (None, 52.5),
+        (52.5, 54.5),
+        (54.5, 56.5),
+        (56.5, 58.5),
+        (58.5, 60.5),
+        (60.5, None),
     ]
     return [
         {"lower_bound_f": lo, "upper_bound_f": hi, "probability": p}
@@ -258,6 +264,85 @@ class TestPersistence:
         path = tmp_path / CALIBRATION_FILENAME
         path.write_text(json.dumps({"computed_at": "2026-01-01"}), encoding="utf-8")
         assert load_calibration(str(tmp_path)) is None
+
+    def test_load_rejects_pre_bounds_fix_file(self, tmp_path) -> None:
+        """A file saved before the v1.9.12 bounds fix (no bounds_version)
+        is ignored — its curves were fitted on distorted probabilities."""
+        path = tmp_path / CALIBRATION_FILENAME
+        path.write_text(
+            json.dumps(
+                {
+                    "curves": {"NYC": _identity_curve()},
+                    "computed_at": "2026-08-01T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert load_calibration(str(tmp_path)) is None
+
+    def test_load_rejects_wrong_bounds_version(self, tmp_path) -> None:
+        path = tmp_path / CALIBRATION_FILENAME
+        path.write_text(
+            json.dumps(
+                {
+                    "curves": {"NYC": _identity_curve()},
+                    "bounds_version": 1,
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert load_calibration(str(tmp_path)) is None
+
+    def test_save_stamps_current_bounds_version(self, tmp_path) -> None:
+        save_calibration({"NYC": _identity_curve()}, str(tmp_path))
+        payload = json.loads((tmp_path / CALIBRATION_FILENAME).read_text(encoding="utf-8"))
+        assert payload["bounds_version"] == BOUNDS_VERSION
+
+
+# ═══════════════════════════════════════════════════════════════
+# Pre-bounds-fix row filtering
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestPreBoundsFixRowFilter:
+    """The fit must not train on predictions stored with 1°F-wide brackets."""
+
+    def test_detects_old_format_row(self) -> None:
+        old_brackets = [
+            {"lower_bound_f": None, "upper_bound_f": 89.0, "probability": 0.2},
+            {"lower_bound_f": 89.0, "upper_bound_f": 90.0, "probability": 0.3},
+            {"lower_bound_f": 91.0, "upper_bound_f": 92.0, "probability": 0.3},
+            {"lower_bound_f": 96.0, "upper_bound_f": None, "probability": 0.2},
+        ]
+        assert _is_pre_bounds_fix_row(old_brackets) is True
+
+    def test_accepts_fixed_format_row(self) -> None:
+        assert _is_pre_bounds_fix_row(_brackets_with_probs([0.1] * 6)) is False
+
+    def test_accepts_legacy_dot99_row(self) -> None:
+        """Legacy .99-cap rows (~1.99°F wide) are close enough to keep."""
+        legacy = [
+            {"lower_bound_f": 52.0, "upper_bound_f": 53.99, "probability": 0.5},
+            {"lower_bound_f": 54.0, "upper_bound_f": 55.99, "probability": 0.5},
+        ]
+        assert _is_pre_bounds_fix_row(legacy) is False
+
+    @pytest.mark.asyncio
+    async def test_fit_skips_old_format_rows(self) -> None:
+        """Old-format rows are excluded → insufficient data → identity."""
+        old_brackets = [
+            {"lower_bound_f": None, "upper_bound_f": 52.0, "probability": 0.1},
+            {"lower_bound_f": 53.0, "upper_bound_f": 54.0, "probability": 0.2},
+            {"lower_bound_f": 55.0, "upper_bound_f": 56.0, "probability": 0.4},
+            {"lower_bound_f": 57.0, "upper_bound_f": 58.0, "probability": 0.2},
+            {"lower_bound_f": 59.0, "upper_bound_f": 60.0, "probability": 0.05},
+            {"lower_bound_f": 61.0, "upper_bound_f": None, "probability": 0.05},
+        ]
+        rows = [(old_brackets, 55.5)] * 100  # 600 pairs if they counted
+        session = _mock_session_with_rows(rows)
+
+        curve = await fit_calibration("NYC", session, min_samples=100)
+        assert curve["is_identity"] is True
 
 
 # ═══════════════════════════════════════════════════════════════
