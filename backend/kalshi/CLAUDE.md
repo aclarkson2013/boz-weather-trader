@@ -51,6 +51,7 @@ from backend.common.logging import get_logger
 
 logger = get_logger("AUTH")
 
+
 class KalshiAuth:
     def __init__(self, api_key_id: str, private_key_pem: str):
         self.api_key_id = api_key_id
@@ -81,7 +82,7 @@ class KalshiAuth:
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.DIGEST_LENGTH,
             ),
-            hashes.SHA256()
+            hashes.SHA256(),
         )
 
         sig_b64 = base64.b64encode(signature).decode()
@@ -117,6 +118,7 @@ Conversion helpers:
 def dollars_to_cents(price: float) -> int:
     """Convert dollar price to Kalshi API cents. Rounds to nearest cent."""
     return int(round(price * 100))
+
 
 def cents_to_dollars(cents: int) -> float:
     """Convert Kalshi API cents to dollar price."""
@@ -545,7 +547,7 @@ class KalshiWebSocket:
         """Reconnect with exponential backoff, re-subscribe to previous channels."""
         for attempt in range(max_retries):
             try:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.info(f"Reconnect attempt {attempt + 1}/{max_retries}, waiting {wait}s")
                 await asyncio.sleep(wait)
                 await self.connect()
@@ -652,12 +654,14 @@ class KalshiClient:
 
         try:
             response = await self.client.request(
-                method, url, headers=headers, params=params, json=json_data,
+                method,
+                url,
+                headers=headers,
+                params=params,
+                json=json_data,
             )
         except httpx.RequestError as exc:
-            raise KalshiConnectionError(
-                f"Network error: {exc}", context={"path": path}
-            ) from exc
+            raise KalshiConnectionError(f"Network error: {exc}", context={"path": path}) from exc
 
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After", "unknown")
@@ -771,17 +775,21 @@ class KalshiClient:
         # CRITICAL: validate before sending to API
         order.validate_for_submission()
         data = await self._request(
-            "POST", "/portfolio/orders", json_data=order.to_api_dict(),
+            "POST",
+            "/portfolio/orders",
+            json_data=order.to_api_dict(),
         )
         logger.info(
             "Order placed",
-            extra={"data": {
-                "order_id": data["order"]["order_id"],
-                "ticker": order.ticker,
-                "side": order.side,
-                "price_cents": order.yes_price,
-                "qty": order.count,
-            }},
+            extra={
+                "data": {
+                    "order_id": data["order"]["order_id"],
+                    "ticker": order.ticker,
+                    "side": order.side,
+                    "price_cents": order.yes_price,
+                    "qty": order.count,
+                }
+            },
         )
         return OrderResponse(**data["order"])
 
@@ -812,7 +820,9 @@ class KalshiClient:
             limit: Max number of settlements to return.
         """
         data = await self._request(
-            "GET", "/portfolio/settlements", params={"limit": limit},
+            "GET",
+            "/portfolio/settlements",
+            params={"limit": limit},
         )
         return [KalshiSettlement(**s) for s in data.get("settlements", [])]
 
@@ -1001,34 +1011,42 @@ class KalshiError(Exception):
         base = super().__str__()
         if self.context:
             # NEVER include API keys in context!
-            safe_ctx = {k: v for k, v in self.context.items()
-                        if "key" not in k.lower() and "secret" not in k.lower()}
+            safe_ctx = {
+                k: v
+                for k, v in self.context.items()
+                if "key" not in k.lower() and "secret" not in k.lower()
+            }
             return f"{base} | context={safe_ctx}"
         return base
 
 
 class KalshiAuthError(KalshiError):
     """Invalid keys, expired signature, or 401 response."""
+
     pass
 
 
 class KalshiRateLimitError(KalshiError):
     """Rate limit exceeded (429). Check context for retry_after."""
+
     pass
 
 
 class KalshiOrderRejectedError(KalshiError):
     """Order rejected by Kalshi (insufficient balance, market closed, etc.)."""
+
     pass
 
 
 class KalshiApiError(KalshiError):
     """Generic API error with status code and message."""
+
     pass
 
 
 class KalshiConnectionError(KalshiError):
     """Network issues, timeout, or WebSocket disconnect."""
+
     pass
 ```
 
@@ -1315,6 +1333,7 @@ The trading scheduler (`backend/trading/scheduler.py`) was modified to try Redis
 `KalshiWebSocket` now accepts an optional `url` parameter:
 ```python
 DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
+
 
 def __init__(self, auth: KalshiAuth, url: str | None = None) -> None:
     self._url = url or self.WS_URL

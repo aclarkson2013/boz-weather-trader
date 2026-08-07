@@ -30,15 +30,23 @@ backend/trading/
 - **Shared Imports:**
   ```python
   from backend.common.schemas import (
-      BracketProbability, BracketPrediction, TradeSignal,
-      TradeRecord, UserSettings, WeatherData, PendingTrade,
+      BracketProbability,
+      BracketPrediction,
+      TradeSignal,
+      TradeRecord,
+      UserSettings,
+      WeatherData,
+      PendingTrade,
   )
   from backend.common.logging import get_logger
   from backend.common.config import settings
   from backend.common.database import async_session
   from backend.common.models import Trade, Settlement, DailyRiskState, Prediction
   from backend.common.exceptions import (
-      BozBaseException, RiskLimitError, CooldownActiveError, InvalidOrderError,
+      BozBaseException,
+      RiskLimitError,
+      CooldownActiveError,
+      InvalidOrderError,
   )
   ```
 
@@ -270,14 +278,16 @@ def scan_bracket(
 
     logger.debug(
         "Bracket scan",
-        extra={"data": {
-            "city": city,
-            "bracket": bracket.bracket_label,
-            "model_prob": bracket.probability,
-            "market_cents": market_price_cents,
-            "ev_yes": ev_yes,
-            "ev_no": ev_no,
-        }},
+        extra={
+            "data": {
+                "city": city,
+                "bracket": bracket.bracket_label,
+                "model_prob": bracket.probability,
+                "market_cents": market_price_cents,
+                "ev_yes": ev_yes,
+                "ev_no": ev_no,
+            }
+        },
     )
 
     # Pick the better side if both are positive
@@ -294,7 +304,9 @@ def scan_bracket(
     if best_side is None:
         return None  # No trade
 
-    market_prob = market_price_cents / 100 if best_side == "yes" else (100 - market_price_cents) / 100
+    market_prob = (
+        market_price_cents / 100 if best_side == "yes" else (100 - market_price_cents) / 100
+    )
 
     return TradeSignal(
         city=city,
@@ -348,11 +360,13 @@ def scan_all_brackets(
 
     logger.info(
         "Bracket scan complete",
-        extra={"data": {
-            "city": prediction.city,
-            "total_brackets": len(prediction.brackets),
-            "signals_found": len(signals),
-        }},
+        extra={
+            "data": {
+                "city": prediction.city,
+                "total_brackets": len(prediction.brackets),
+                "signals_found": len(signals),
+            }
+        },
     )
     return signals
 
@@ -397,6 +411,7 @@ class GuardrailSettings:
     model_weight: float = 0.7
     max_model_market_divergence: float = 0.30
     min_market_prob_for_yes: float = 0.05
+
 
 def apply_guardrails(
     model_prob: float,
@@ -448,11 +463,13 @@ def validate_predictions(predictions: list[BracketPrediction]) -> bool:
             if math.isnan(b.probability) or b.probability < 0:
                 logger.error(
                     "Invalid probability value",
-                    extra={"data": {
-                        "city": pred.city,
-                        "bracket": b.bracket_label,
-                        "probability": b.probability,
-                    }},
+                    extra={
+                        "data": {
+                            "city": pred.city,
+                            "bracket": b.bracket_label,
+                            "probability": b.probability,
+                        }
+                    },
                 )
                 return False
 
@@ -469,10 +486,12 @@ def validate_predictions(predictions: list[BracketPrediction]) -> bool:
         if age > timedelta(hours=2):
             logger.warning(
                 "Stale predictions detected",
-                extra={"data": {
-                    "city": pred.city,
-                    "age_hours": round(age.total_seconds() / 3600, 2),
-                }},
+                extra={
+                    "data": {
+                        "city": pred.city,
+                        "age_hours": round(age.total_seconds() / 3600, 2),
+                    }
+                },
             )
             return False
 
@@ -483,10 +502,15 @@ def validate_market_prices(prices: dict[str, int]) -> bool:
     """Validate market prices from Kalshi before using them."""
     for label, price in prices.items():
         if not isinstance(price, int):
-            logger.error("Market price is not an integer", extra={"data": {"bracket": label, "price": price}})
+            logger.error(
+                "Market price is not an integer", extra={"data": {"bracket": label, "price": price}}
+            )
             return False
         if not (1 <= price <= 99):
-            logger.error("Market price out of range", extra={"data": {"bracket": label, "price_cents": price}})
+            logger.error(
+                "Market price out of range",
+                extra={"data": {"bracket": label, "price_cents": price}},
+            )
             return False
     return True
 ```
@@ -583,20 +607,28 @@ class RiskManager:
                 "Trade blocked: exceeds max trade size",
                 extra={"data": {"cost": trade_cost, "max": self.settings.max_trade_size}},
             )
-            return False, f"Trade cost ${trade_cost:.2f} exceeds max ${self.settings.max_trade_size:.2f}"
+            return (
+                False,
+                f"Trade cost ${trade_cost:.2f} exceeds max ${self.settings.max_trade_size:.2f}",
+            )
 
         # 3. Daily exposure check
         current_exposure = await self.get_open_exposure()
         if current_exposure + trade_cost > self.settings.max_daily_exposure:
             logger.info(
                 "Trade blocked: daily exposure limit",
-                extra={"data": {
-                    "current_exposure": current_exposure,
-                    "trade_cost": trade_cost,
-                    "limit": self.settings.max_daily_exposure,
-                }},
+                extra={
+                    "data": {
+                        "current_exposure": current_exposure,
+                        "trade_cost": trade_cost,
+                        "limit": self.settings.max_daily_exposure,
+                    }
+                },
             )
-            return False, f"Would exceed daily exposure (${current_exposure:.2f} + ${trade_cost:.2f} > ${self.settings.max_daily_exposure:.2f})"
+            return (
+                False,
+                f"Would exceed daily exposure (${current_exposure:.2f} + ${trade_cost:.2f} > ${self.settings.max_daily_exposure:.2f})",
+            )
 
         # 4. Daily loss check
         daily_pnl = await self.get_daily_pnl()
@@ -605,21 +637,29 @@ class RiskManager:
                 "Trade blocked: daily loss limit",
                 extra={"data": {"daily_pnl": daily_pnl, "limit": self.settings.daily_loss_limit}},
             )
-            return False, f"Daily loss limit reached (P&L: ${daily_pnl:.2f}, limit: -${self.settings.daily_loss_limit:.2f})"
+            return (
+                False,
+                f"Daily loss limit reached (P&L: ${daily_pnl:.2f}, limit: -${self.settings.daily_loss_limit:.2f})",
+            )
 
         # 5. EV threshold check
         if signal.ev < self.settings.min_ev_threshold:
-            return False, f"EV ${signal.ev:.4f} below threshold ${self.settings.min_ev_threshold:.4f}"
+            return (
+                False,
+                f"EV ${signal.ev:.4f} below threshold ${self.settings.min_ev_threshold:.4f}",
+            )
 
         logger.info(
             "Trade approved by risk manager",
-            extra={"data": {
-                "city": signal.city,
-                "bracket": signal.bracket.bracket_label,
-                "side": signal.side,
-                "ev": signal.ev,
-                "cost": trade_cost,
-            }},
+            extra={
+                "data": {
+                    "city": signal.city,
+                    "bracket": signal.bracket.bracket_label,
+                    "side": signal.side,
+                    "ev": signal.ev,
+                    "cost": trade_cost,
+                }
+            },
         )
         return True, "All checks passed"
 
@@ -627,8 +667,7 @@ class RiskManager:
         """Sum today's realized P&L from settled trades."""
         trading_day = get_trading_day()
         result = await self.db.execute(
-            select(func.coalesce(func.sum(Trade.pnl), 0.0))
-            .where(
+            select(func.coalesce(func.sum(Trade.pnl), 0.0)).where(
                 Trade.settled_at.isnot(None),
                 func.date(Trade.trade_date) == trading_day,
             )
@@ -638,8 +677,9 @@ class RiskManager:
     async def get_open_exposure(self) -> float:
         """Sum cost of all unsettled open positions."""
         result = await self.db.execute(
-            select(func.coalesce(func.sum(Trade.entry_price * Trade.quantity), 0.0))
-            .where(Trade.status.in_([TradeStatus.EXECUTED, TradeStatus.PENDING, TradeStatus.APPROVED]))
+            select(func.coalesce(func.sum(Trade.entry_price * Trade.quantity), 0.0)).where(
+                Trade.status.in_([TradeStatus.EXECUTED, TradeStatus.PENDING, TradeStatus.APPROVED])
+            )
         )
         return float(result.scalar())
 
@@ -647,12 +687,14 @@ class RiskManager:
         """Update risk tracking after a trade executes."""
         logger.info(
             "Recording trade for risk tracking",
-            extra={"data": {
-                "trade_id": trade.id,
-                "city": trade.city,
-                "side": trade.side,
-                "cost": trade.entry_price,
-            }},
+            extra={
+                "data": {
+                    "trade_id": trade.id,
+                    "city": trade.city,
+                    "side": trade.side,
+                    "cost": trade.entry_price,
+                }
+            },
         )
 
     async def _check_cooldown(self) -> tuple[bool, str]:
@@ -662,6 +704,7 @@ class RiskManager:
         """
         # Delegate to CooldownManager — see cooldown.py section below
         from backend.trading.cooldown import CooldownManager
+
         cm = CooldownManager(self.settings, self.db)
         return await cm.is_cooldown_active()
 
@@ -728,21 +771,25 @@ async def check_and_reserve_exposure(self, amount: float) -> bool:
         if state.total_exposure + amount > self.settings.max_daily_exposure:
             logger.info(
                 "Exposure reservation denied",
-                extra={"data": {
-                    "requested": amount,
-                    "current": state.total_exposure,
-                    "limit": self.settings.max_daily_exposure,
-                }},
+                extra={
+                    "data": {
+                        "requested": amount,
+                        "current": state.total_exposure,
+                        "limit": self.settings.max_daily_exposure,
+                    }
+                },
             )
             return False
 
         state.total_exposure += amount
         logger.info(
             "Exposure reserved",
-            extra={"data": {
-                "amount": amount,
-                "new_total": state.total_exposure,
-            }},
+            extra={
+                "data": {
+                    "amount": amount,
+                    "new_total": state.total_exposure,
+                }
+            },
         )
         return True
 ```
@@ -832,7 +879,9 @@ class CooldownManager:
         if state.cooldown_until and now < state.cooldown_until:
             remaining = (state.cooldown_until - now).total_seconds() / 60
             reason = f"Per-loss cooldown: {remaining:.0f} min remaining"
-            logger.info("Cooldown active", extra={"data": {"type": "per_loss", "remaining_min": remaining}})
+            logger.info(
+                "Cooldown active", extra={"data": {"type": "per_loss", "remaining_min": remaining}}
+            )
             return True, reason
 
         # Check consecutive-loss cooldown (rest of day)
@@ -865,7 +914,12 @@ class CooldownManager:
             state.rest_of_day_cooldown = True
             logger.warning(
                 "Consecutive loss limit hit",
-                extra={"data": {"count": state.consecutive_losses, "limit": self.settings.consecutive_loss_limit}},
+                extra={
+                    "data": {
+                        "count": state.consecutive_losses,
+                        "limit": self.settings.consecutive_loss_limit,
+                    }
+                },
             )
 
         await self.db.commit()
@@ -880,16 +934,16 @@ class CooldownManager:
     async def _get_daily_state(self) -> DailyRiskState | None:
         """Get today's risk state, or None if not yet created."""
         from backend.trading.risk_manager import get_trading_day
+
         result = await self.db.execute(
-            select(DailyRiskState).where(
-                DailyRiskState.trading_day == get_trading_day()
-            )
+            select(DailyRiskState).where(DailyRiskState.trading_day == get_trading_day())
         )
         return result.scalar_one_or_none()
 
     async def _get_or_create_daily_state(self) -> DailyRiskState:
         """Get or create today's risk state."""
         from backend.trading.risk_manager import get_trading_day
+
         state = await self._get_daily_state()
         if state is None:
             state = DailyRiskState(trading_day=get_trading_day())
@@ -1011,14 +1065,16 @@ async def queue_trade(
 
     logger.info(
         "Trade queued for approval",
-        extra={"data": {
-            "trade_id": pending.id,
-            "city": signal.city,
-            "bracket": signal.bracket.bracket_label,
-            "side": signal.side,
-            "ev": signal.ev,
-            "expires_at": str(pending.expires_at),
-        }},
+        extra={
+            "data": {
+                "trade_id": pending.id,
+                "city": signal.city,
+                "bracket": signal.bracket.bracket_label,
+                "side": signal.side,
+                "ev": signal.ev,
+                "expires_at": str(pending.expires_at),
+            }
+        },
     )
 
     return pending
@@ -1169,12 +1225,14 @@ async def execute_trade(
 
     logger.info(
         "Placing order",
-        extra={"data": {
-            "ticker": signal.market_ticker,
-            "side": signal.side,
-            "price_cents": signal.market_price,
-            "quantity": signal.quantity,
-        }},
+        extra={
+            "data": {
+                "ticker": signal.market_ticker,
+                "side": signal.side,
+                "price_cents": signal.market_price,
+                "quantity": signal.quantity,
+            }
+        },
     )
 
     try:
@@ -1182,12 +1240,14 @@ async def execute_trade(
     except Exception as e:
         logger.error(
             "Order placement failed",
-            extra={"data": {
-                "ticker": signal.market_ticker,
-                "error": str(e),
-                "side": signal.side,
-                "price_cents": signal.market_price,
-            }},
+            extra={
+                "data": {
+                    "ticker": signal.market_ticker,
+                    "error": str(e),
+                    "side": signal.side,
+                    "price_cents": signal.market_price,
+                }
+            },
         )
         raise
 
@@ -1199,11 +1259,13 @@ async def execute_trade(
     if remaining > 0:
         logger.info(
             "Partial fill",
-            extra={"data": {
-                "ticker": signal.market_ticker,
-                "filled": filled_count,
-                "remaining": remaining,
-            }},
+            extra={
+                "data": {
+                    "ticker": signal.market_ticker,
+                    "filled": filled_count,
+                    "remaining": remaining,
+                }
+            },
         )
 
     # Verify order status after placement
@@ -1248,16 +1310,18 @@ async def execute_trade(
 
     logger.info(
         "Trade executed and recorded",
-        extra={"data": {
-            "trade_id": trade_id,
-            "order_id": order_id,
-            "city": signal.city,
-            "bracket": signal.bracket.bracket_label,
-            "side": signal.side,
-            "price_cents": signal.market_price,
-            "quantity": filled_count,
-            "ev": signal.ev,
-        }},
+        extra={
+            "data": {
+                "trade_id": trade_id,
+                "order_id": order_id,
+                "city": signal.city,
+                "bracket": signal.bracket.bracket_label,
+                "side": signal.side,
+                "price_cents": signal.market_price,
+                "quantity": filled_count,
+                "ev": signal.ev,
+            }
+        },
     )
 
     return TradeRecord(
@@ -1427,13 +1491,15 @@ async def settle_trade(
 
     logger.info(
         "Trade settled",
-        extra={"data": {
-            "trade_id": trade.id,
-            "status": trade.status.value,
-            "pnl": trade.pnl,
-            "actual_temp_f": actual_temp,
-            "bracket": bracket,
-        }},
+        extra={
+            "data": {
+                "trade_id": trade.id,
+                "status": trade.status.value,
+                "pnl": trade.pnl,
+                "actual_temp_f": actual_temp,
+                "bracket": bracket,
+            }
+        },
     )
 
 
@@ -1509,11 +1575,13 @@ class NotificationService:
             body: Notification body text.
             data: Optional JSON-serializable data for the PWA to process on tap.
         """
-        payload = json.dumps({
-            "title": title,
-            "body": body,
-            "data": data or {},
-        })
+        payload = json.dumps(
+            {
+                "title": title,
+                "body": body,
+                "data": data or {},
+            }
+        )
         try:
             webpush(
                 subscription_info=self.subscription,
@@ -1597,7 +1665,11 @@ async def _run_trading_cycle():
     11. Log ALL decisions (including skipped trades and why)
     """
     from backend.trading.risk_manager import RiskManager, get_trading_day
-    from backend.trading.ev_calculator import scan_all_brackets, validate_predictions, validate_market_prices
+    from backend.trading.ev_calculator import (
+        scan_all_brackets,
+        validate_predictions,
+        validate_market_prices,
+    )
     from backend.trading.executor import execute_trade
     from backend.trading.trade_queue import queue_trade
     from backend.trading.notifications import NotificationService
@@ -1658,11 +1730,13 @@ async def _run_trading_cycle():
                 if not allowed:
                     logger.info(
                         "Trade blocked by risk manager",
-                        extra={"data": {
-                            "city": signal.city,
-                            "bracket": signal.bracket.bracket_label,
-                            "reason": risk_reason,
-                        }},
+                        extra={
+                            "data": {
+                                "city": signal.city,
+                                "bracket": signal.bracket.bracket_label,
+                                "reason": risk_reason,
+                            }
+                        },
                     )
                     continue
 
@@ -1713,9 +1787,7 @@ async def _settle_and_postmortem():
         from sqlalchemy import select
         from backend.common.models import Trade, Settlement, TradeStatus
 
-        open_trades = await db.execute(
-            select(Trade).where(Trade.status == TradeStatus.EXECUTED)
-        )
+        open_trades = await db.execute(select(Trade).where(Trade.status == TradeStatus.EXECUTED))
 
         for trade in open_trades.scalars().all():
             # Use market_date (from ticker) for settlement matching, NOT trade_date.
@@ -1725,6 +1797,7 @@ async def _settle_and_postmortem():
             if settle_date is None:
                 # Fallback: parse from ticker for pre-migration trades
                 from backend.kalshi.markets import parse_market_date_from_ticker
+
                 parsed = parse_market_date_from_ticker(trade.market_ticker)
                 if parsed is not None:
                     settle_date = datetime.combine(parsed, datetime.min.time())
@@ -1771,9 +1844,11 @@ async def _load_user_settings(db) -> "UserSettings":
     """Load user settings from database."""
     ...
 
+
 async def _get_kalshi_client(db) -> "KalshiClient":
     """Build authenticated Kalshi client."""
     ...
+
 
 async def _get_notification_service(db) -> "NotificationService":
     """Build notification service with user's push subscription."""
@@ -1836,11 +1911,13 @@ from backend.common.exceptions import BozBaseException
 
 class TradingError(BozBaseException):
     """General trading engine error."""
+
     pass
 
 
 class TradingHaltedError(BozBaseException):
     """Trading has been halted (e.g., invalid data, system issue)."""
+
     pass
 
 
@@ -1945,6 +2022,7 @@ These tests verify that the trading engine cannot:
 - Trade on garbage data
 - Create race conditions on risk limits
 """
+
 import pytest
 import math
 from unittest.mock import AsyncMock

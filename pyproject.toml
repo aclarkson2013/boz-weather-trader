@@ -40,7 +40,9 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-httpx>=0.28.0",
     "pytest-cov>=4.1.0",
-    "ruff>=0.1.8",
+    # Pinned to a minor series: CI installs this fresh, and ruff minor bumps
+    # change formatting output (0.15→0.16 broke Backend Lint on 2026-08-06).
+    "ruff>=0.16,<0.17",
 ]
 
 [tool.setuptools.dynamic]

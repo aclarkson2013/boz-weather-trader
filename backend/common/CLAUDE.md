@@ -34,11 +34,12 @@ class WeatherData(BaseModel):
     city: Literal["NYC", "CHI", "MIA", "AUS"]
     date: date
     forecast_high_f: float
-    source: str                    # "NWS", "Open-Meteo:GFS", "Open-Meteo:ECMWF", etc.
+    source: str  # "NWS", "Open-Meteo:GFS", "Open-Meteo:ECMWF", etc.
     model_run_timestamp: datetime
-    variables: WeatherVariables    # temp, humidity, wind, cloud cover, etc.
-    raw_data: dict                 # full raw API response
+    variables: WeatherVariables  # temp, humidity, wind, cloud cover, etc.
+    raw_data: dict  # full raw API response
     fetched_at: datetime
+
 
 class WeatherVariables(BaseModel):
     temp_high_f: float
@@ -50,12 +51,14 @@ class WeatherVariables(BaseModel):
     dew_point_f: float | None
     pressure_mb: float | None
 
+
 # Bracket Prediction (Agent 3 -> Agent 4)
 class BracketProbability(BaseModel):
-    bracket_label: str             # e.g., "53-54F"
-    lower_bound_f: float | None    # None for bottom edge bracket
-    upper_bound_f: float | None    # None for top edge bracket
-    probability: float             # 0.0 to 1.0
+    bracket_label: str  # e.g., "53-54F"
+    lower_bound_f: float | None  # None for bottom edge bracket
+    upper_bound_f: float | None  # None for top edge bracket
+    probability: float  # 0.0 to 1.0
+
 
 class BracketPrediction(BaseModel):
     city: str
@@ -68,6 +71,7 @@ class BracketPrediction(BaseModel):
     error_std_f: float
     generated_at: datetime
 
+
 # Trade Signal (Agent 4 internal + queue)
 class TradeSignal(BaseModel):
     city: str
@@ -75,10 +79,13 @@ class TradeSignal(BaseModel):
     side: Literal["yes", "no"]
     market_price: float
     model_probability: float
-    blended_probability: float | None  # guardrail-blended prob (model_weight * model + (1-model_weight) * market)
+    blended_probability: (
+        float | None
+    )  # guardrail-blended prob (model_weight * model + (1-model_weight) * market)
     ev: float
     confidence: str
     reasoning: str
+
 
 # Trade Record (for post-mortem, Agent 4 -> storage)
 class TradeRecord(BaseModel):
@@ -93,35 +100,36 @@ class TradeRecord(BaseModel):
     market_probability: float
     ev_at_entry: float
     confidence: str
-    weather_forecasts: list[WeatherData]   # snapshots at time of trade
-    prediction: BracketPrediction          # model output at time of trade
+    weather_forecasts: list[WeatherData]  # snapshots at time of trade
+    prediction: BracketPrediction  # model output at time of trade
     status: Literal["OPEN", "WON", "LOST", "CANCELLED"]
     settlement_temp_f: float | None
     settlement_source: str | None
     pnl: float | None
-    postmortem: str | None                 # generated narrative
+    postmortem: str | None  # generated narrative
     created_at: datetime
     settled_at: datetime | None
+
 
 # User Settings
 class UserSettings(BaseModel):
     trading_mode: Literal["auto", "manual"]
-    max_trade_size: float          # dollars
+    max_trade_size: float  # dollars
     daily_loss_limit: float
     max_daily_exposure: float
-    min_ev_threshold: float        # 0.0 to 1.0
+    min_ev_threshold: float  # 0.0 to 1.0
     cooldown_per_loss_minutes: int
     consecutive_loss_limit: int
-    cities: list[str]              # which cities to trade
+    cities: list[str]  # which cities to trade
     # Guardrail settings (Phase 41)
-    model_weight: float            # 0.0-1.0, weight for model vs market in blended probability
+    model_weight: float  # 0.0-1.0, weight for model vs market in blended probability
     max_model_market_divergence: float  # max allowed abs diff between model and market prob
-    min_market_prob_for_yes: float      # min market probability to allow YES trades
+    min_market_prob_for_yes: float  # min market probability to allow YES trades
     # Split EV thresholds (Phase 48)
-    min_ev_threshold_yes: float    # 0.0 to 1.0, minimum EV for YES trades
-    min_ev_threshold_no: float     # 0.0 to 1.0, minimum EV for NO trades
+    min_ev_threshold_yes: float  # 0.0 to 1.0, minimum EV for YES trades
+    min_ev_threshold_no: float  # 0.0 to 1.0, minimum EV for NO trades
     # Fee estimation mode (Phase 49)
-    fee_estimate_mode: str         # "conservative" or "realistic"
+    fee_estimate_mode: str  # "conservative" or "realistic"
 ```
 
 ---
@@ -133,20 +141,34 @@ All database tables are defined here. These map directly to PostgreSQL tables ma
 ### Enums
 
 ```python
-from sqlalchemy import Column, String, Float, DateTime, Integer, Boolean, JSON, Text, ForeignKey, Enum as SQLEnum
+from sqlalchemy import (
+    Column,
+    String,
+    Float,
+    DateTime,
+    Integer,
+    Boolean,
+    JSON,
+    Text,
+    ForeignKey,
+    Enum as SQLEnum,
+)
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from datetime import datetime, date
 import enum
 
+
 class Base(AsyncAttrs, DeclarativeBase):
     pass
+
 
 class CityEnum(str, enum.Enum):
     NYC = "NYC"
     CHI = "CHI"
     MIA = "MIA"
     AUS = "AUS"
+
 
 class TradeStatus(str, enum.Enum):
     PENDING = "PENDING"
@@ -174,7 +196,7 @@ class User(Base):
     min_market_prob_for_yes = Column(Float, default=0.05)  # min market prob for YES trades
     # Split EV thresholds (Phase 48)
     min_ev_threshold_yes = Column(Float, default=0.05)  # separate YES EV threshold
-    min_ev_threshold_no = Column(Float, default=0.05)   # separate NO EV threshold
+    min_ev_threshold_no = Column(Float, default=0.05)  # separate NO EV threshold
     # Fee estimation (Phase 49)
     fee_estimate_mode = Column(String, default="conservative")  # "conservative" or "realistic"
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -205,7 +227,9 @@ class Prediction(Base):
     city = Column(SQLEnum(CityEnum), nullable=False, index=True)
     prediction_date = Column(DateTime, nullable=False)
     ensemble_forecast_f = Column(Float, nullable=False)
-    bracket_probabilities = Column(JSON, nullable=False)  # list of {label, lower, upper, probability}
+    bracket_probabilities = Column(
+        JSON, nullable=False
+    )  # list of {label, lower, upper, probability}
     confidence = Column(String, nullable=False)
     model_sources = Column(JSON)
     forecast_spread_f = Column(Float)
@@ -273,7 +297,18 @@ class LogEntry(Base):
 ### Full models.py Implementation (Copy-Paste Ready)
 
 ```python
-from sqlalchemy import Column, String, Float, DateTime, Integer, Boolean, JSON, Text, ForeignKey, Enum as SQLEnum
+from sqlalchemy import (
+    Column,
+    String,
+    Float,
+    DateTime,
+    Integer,
+    Boolean,
+    JSON,
+    Text,
+    ForeignKey,
+    Enum as SQLEnum,
+)
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from datetime import datetime, date
@@ -314,7 +349,7 @@ class User(Base):
     min_market_prob_for_yes = Column(Float, default=0.05)  # min market prob for YES trades
     # Split EV thresholds (Phase 48)
     min_ev_threshold_yes = Column(Float, default=0.05)  # separate YES EV threshold
-    min_ev_threshold_no = Column(Float, default=0.05)   # separate NO EV threshold
+    min_ev_threshold_no = Column(Float, default=0.05)  # separate NO EV threshold
     # Fee estimation (Phase 49)
     fee_estimate_mode = Column(String, default="conservative")  # "conservative" or "realistic"
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -339,7 +374,9 @@ class Prediction(Base):
     city = Column(SQLEnum(CityEnum), nullable=False, index=True)
     prediction_date = Column(DateTime, nullable=False)
     ensemble_forecast_f = Column(Float, nullable=False)
-    bracket_probabilities = Column(JSON, nullable=False)  # list of {label, lower, upper, probability}
+    bracket_probabilities = Column(
+        JSON, nullable=False
+    )  # list of {label, lower, upper, probability}
     confidence = Column(String, nullable=False)
     model_sources = Column(JSON)
     forecast_spread_f = Column(Float)
@@ -411,6 +448,7 @@ from backend.common.config import settings
 engine = create_async_engine(settings.database_url, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+
 async def get_db() -> AsyncSession:
     async with async_session() as session:
         try:
@@ -420,8 +458,11 @@ async def get_db() -> AsyncSession:
             await session.rollback()
             raise
 
+
 # FastAPI dependency
 from fastapi import Depends
+
+
 async def get_db_session(session: AsyncSession = Depends(get_db)):
     return session
 ```
@@ -434,6 +475,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.common.database import get_db_session
 
 router = APIRouter()
+
 
 @router.get("/trades")
 async def list_trades(db: AsyncSession = Depends(get_db_session)):
@@ -449,10 +491,12 @@ The `async_session()` helper function provides database sessions outside of Fast
 import asyncio
 from backend.common.database import async_session
 
+
 async def _do_db_work():
     async with async_session() as session:
         # ... your queries here
         await session.commit()
+
 
 def celery_task():
     asyncio.run(_do_db_work())
@@ -471,9 +515,11 @@ Handles encryption and decryption of Kalshi RSA private keys at rest. Uses Ferne
 from cryptography.fernet import Fernet
 from backend.common.config import settings
 
+
 def encrypt_api_key(plaintext: str) -> str:
     f = Fernet(settings.encryption_key.encode())
     return f.encrypt(plaintext.encode()).decode()
+
 
 def decrypt_api_key(ciphertext: str) -> str:
     f = Fernet(settings.encryption_key.encode())
@@ -525,14 +571,16 @@ import logging
 import json
 from datetime import datetime
 
+
 class StructuredFormatter(logging.Formatter):
     def format(self, record):
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        module = getattr(record, 'module_tag', 'SYSTEM')
-        data = getattr(record, 'data', {})
+        module = getattr(record, "module_tag", "SYSTEM")
+        data = getattr(record, "data", {})
         # SECURITY: redact anything that looks like a key
         data_str = json.dumps(data) if data else "{}"
         return f"[{timestamp}] {record.levelname:<8} {module:<12} {record.getMessage()}  {data_str}"
+
 
 def get_logger(module_tag: str) -> logging.Logger:
     logger = logging.getLogger(f"boz.{module_tag}")
@@ -543,10 +591,12 @@ def get_logger(module_tag: str) -> logging.Logger:
         logger.addHandler(handler)
     # Attach module_tag so formatter can use it
     old_makeRecord = logger.makeRecord
+
     def makeRecord(name, level, fn, lno, msg, args, exc_info, func=None, extra=None, sinfo=None):
         extra = extra or {}
-        extra['module_tag'] = module_tag
+        extra["module_tag"] = module_tag
         return old_makeRecord(name, level, fn, lno, msg, args, exc_info, func, extra, sinfo)
+
     logger.makeRecord = makeRecord
     return logger
 ```
@@ -573,7 +623,9 @@ logger.info("Fetched NWS forecast", extra={"data": {"city": "NYC", "high_f": 55}
 logger.warning("Stale forecast detected", extra={"data": {"city": "CHI", "age_minutes": 95}})
 
 # Error logging
-logger.error("API call failed", extra={"data": {"url": "https://api.weather.gov/...", "status": 503}})
+logger.error(
+    "API call failed", extra={"data": {"url": "https://api.weather.gov/...", "status": 503}}
+)
 ```
 
 ### Module Tag Reference
@@ -615,6 +667,7 @@ Uses pydantic-settings to read from environment variables and `.env` file. All c
 from pydantic_settings import BaseSettings
 from typing import Literal
 
+
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://boz:boz@localhost:5432/boz_weather_trader"
@@ -646,6 +699,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
 
 settings = Settings()
 ```
@@ -709,28 +763,39 @@ All custom exceptions inherit from `BozBaseException`, which carries an optional
 # backend/common/exceptions.py
 class BozBaseException(Exception):
     """Base exception for all Boz Weather Trader errors."""
+
     def __init__(self, message: str, context: dict | None = None):
         super().__init__(message)
         self.context = context or {}
 
+
 class StaleDataError(BozBaseException):
     """Weather data is too old to trade on."""
+
     pass
+
 
 class RiskLimitError(BozBaseException):
     """A risk limit would be violated by this action."""
+
     pass
+
 
 class CooldownActiveError(BozBaseException):
     """Trading is paused due to cooldown."""
+
     pass
+
 
 class InsufficientBalanceError(BozBaseException):
     """Not enough balance to place this trade."""
+
     pass
+
 
 class InvalidOrderError(BozBaseException):
     """Order parameters are invalid."""
+
     pass
 ```
 
@@ -743,14 +808,13 @@ from backend.common.exceptions import RiskLimitError, StaleDataError
 if daily_loss >= settings.default_daily_loss_limit:
     raise RiskLimitError(
         "Daily loss limit reached",
-        context={"current_loss": daily_loss, "limit": settings.default_daily_loss_limit}
+        context={"current_loss": daily_loss, "limit": settings.default_daily_loss_limit},
     )
 
 # In weather pipeline
 if forecast_age_minutes > 90:
     raise StaleDataError(
-        "Forecast too old for trading",
-        context={"city": "NYC", "age_minutes": forecast_age_minutes}
+        "Forecast too old for trading", context={"city": "NYC", "age_minutes": forecast_age_minutes}
     )
 ```
 
@@ -764,6 +828,7 @@ from fastapi.responses import JSONResponse
 from backend.common.exceptions import BozBaseException
 
 app = FastAPI()
+
 
 @app.exception_handler(BozBaseException)
 async def boz_exception_handler(request: Request, exc: BozBaseException):
@@ -796,6 +861,7 @@ Edit `alembic/env.py` to import your models so autogenerate can detect changes:
 
 ```python
 from backend.common.models import Base
+
 target_metadata = Base.metadata
 ```
 

@@ -264,6 +264,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from backend.common.models import Base
 from backend.common.config import Settings
 
+
 # ─── Async Event Loop ───
 @pytest.fixture(scope="session")
 def event_loop():
@@ -272,8 +273,10 @@ def event_loop():
     yield loop
     loop.close()
 
+
 # ─── Test Database ───
 TEST_DB_URL = "sqlite+aiosqlite:///test.db"  # In-memory alternative: "sqlite+aiosqlite://"
+
 
 @pytest_asyncio.fixture(scope="session")
 async def engine():
@@ -286,6 +289,7 @@ async def engine():
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
+
 @pytest_asyncio.fixture
 async def db(engine):
     """Create a fresh database session per test, with automatic rollback."""
@@ -293,6 +297,7 @@ async def db(engine):
         async with session.begin():
             yield session
             await session.rollback()  # Clean state after each test
+
 
 # ─── Test Settings ───
 @pytest.fixture
@@ -303,16 +308,17 @@ def test_settings() -> Settings:
         kalshi_private_key_path="tests/fixtures/test_key.pem",
         database_url=TEST_DB_URL,
         redis_url="redis://localhost:6379/1",  # Use DB 1 for tests
-        max_trade_size_cents=100,      # $1 max
-        daily_loss_limit_cents=500,    # $5 max
-        max_daily_exposure_cents=1000, # $10 max
-        min_ev_threshold=0.05,         # 5%
+        max_trade_size_cents=100,  # $1 max
+        daily_loss_limit_cents=500,  # $5 max
+        max_daily_exposure_cents=1000,  # $10 max
+        min_ev_threshold=0.05,  # 5%
         cooldown_per_loss_minutes=60,
         consecutive_loss_limit=3,
-        trading_mode="manual",         # Never auto-trade in tests!
+        trading_mode="manual",  # Never auto-trade in tests!
         active_cities=["NYC", "CHI"],
         encryption_key="dGVzdC1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcw==",  # test key
     )
+
 
 # ─── Sample Data Fixtures ───
 @pytest.fixture
@@ -325,12 +331,30 @@ def sample_bracket_prediction():
         city="NYC",
         date=date(2025, 2, 15),
         brackets=[
-            BracketProbability(bracket_label="<=52F", lower_bound_f=float('-inf'), upper_bound_f=52, probability=0.08),
-            BracketProbability(bracket_label="53-54F", lower_bound_f=53, upper_bound_f=54, probability=0.15),
-            BracketProbability(bracket_label="55-56F", lower_bound_f=55, upper_bound_f=56, probability=0.30),
-            BracketProbability(bracket_label="57-58F", lower_bound_f=57, upper_bound_f=58, probability=0.28),
-            BracketProbability(bracket_label="59-60F", lower_bound_f=59, upper_bound_f=60, probability=0.12),
-            BracketProbability(bracket_label=">=61F", lower_bound_f=61, upper_bound_f=float('inf'), probability=0.07),
+            BracketProbability(
+                bracket_label="<=52F",
+                lower_bound_f=float("-inf"),
+                upper_bound_f=52,
+                probability=0.08,
+            ),
+            BracketProbability(
+                bracket_label="53-54F", lower_bound_f=53, upper_bound_f=54, probability=0.15
+            ),
+            BracketProbability(
+                bracket_label="55-56F", lower_bound_f=55, upper_bound_f=56, probability=0.30
+            ),
+            BracketProbability(
+                bracket_label="57-58F", lower_bound_f=57, upper_bound_f=58, probability=0.28
+            ),
+            BracketProbability(
+                bracket_label="59-60F", lower_bound_f=59, upper_bound_f=60, probability=0.12
+            ),
+            BracketProbability(
+                bracket_label=">=61F",
+                lower_bound_f=61,
+                upper_bound_f=float("inf"),
+                probability=0.07,
+            ),
         ],
         ensemble_mean_f=56.3,
         ensemble_std_f=2.1,
@@ -338,6 +362,7 @@ def sample_bracket_prediction():
         generated_at=datetime(2025, 2, 14, 15, 0, 0),
         model_sources=["NWS", "GFS", "ECMWF", "ICON"],
     )
+
 
 @pytest.fixture
 def sample_trade_signal():
@@ -376,6 +401,7 @@ Every test gets a clean database via transaction rollback. This is the preferred
 # Advanced rollback pattern using nested transactions (savepoints).
 # Use this if you need the session to support commits within the test
 # (e.g., testing code that calls session.commit() internally).
+
 
 @pytest_asyncio.fixture
 async def db(engine):
@@ -418,6 +444,7 @@ from pathlib import Path
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
+
 @pytest.fixture
 def mock_nws_points(httpx_mock):
     """Mock NWS /points endpoint for NYC (Central Park)."""
@@ -431,6 +458,7 @@ def mock_nws_points(httpx_mock):
     )
     return httpx_mock
 
+
 @pytest.fixture
 def mock_nws_forecast(httpx_mock):
     """Mock NWS forecast endpoint for NYC grid."""
@@ -442,6 +470,7 @@ def mock_nws_forecast(httpx_mock):
         json=response_data,
     )
     return httpx_mock
+
 
 @pytest.fixture
 def mock_openmeteo(httpx_mock):
@@ -463,6 +492,7 @@ def mock_openmeteo(httpx_mock):
 
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_fetch_nws_forecast(mock_nws_points, mock_nws_forecast):
     """Test that NWS forecast fetching works with mocked responses."""
@@ -481,6 +511,7 @@ async def test_fetch_nws_forecast(mock_nws_points, mock_nws_forecast):
 ```python
 # tests/weather/conftest.py (continued)
 
+
 @pytest.fixture
 def mock_nws_503(httpx_mock):
     """Simulate NWS API being down (503 Service Unavailable)."""
@@ -491,7 +522,9 @@ def mock_nws_503(httpx_mock):
     )
     return httpx_mock
 
+
 # tests/weather/test_nws.py (continued)
+
 
 @pytest.mark.asyncio
 async def test_nws_handles_503_gracefully(mock_nws_503):
@@ -527,6 +560,7 @@ All async tests use `pytest-asyncio`. With `asyncio_mode = "auto"` in pyproject.
 ```python
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_async_function():
     """Basic async test pattern."""
@@ -552,7 +586,7 @@ async def test_cooldown_expires():
 
     # Fast-forward time by 61 minutes
     future_time = datetime.now() + timedelta(minutes=61)
-    with patch('backend.trading.cooldown.datetime') as mock_dt:
+    with patch("backend.trading.cooldown.datetime") as mock_dt:
         mock_dt.now.return_value = future_time
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
         assert manager.is_active() is False
@@ -610,6 +644,7 @@ Kalshi API calls are mocked with `unittest.mock.AsyncMock` (for the client objec
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+
 @pytest.fixture
 def mock_kalshi_client():
     """Create a fully mocked Kalshi client."""
@@ -657,11 +692,10 @@ def mock_kalshi_client():
     }
 
     # Mock create_order (rejected)
-    client.create_order_rejected = AsyncMock(
-        side_effect=Exception("Insufficient balance")
-    )
+    client.create_order_rejected = AsyncMock(side_effect=Exception("Insufficient balance"))
 
     return client
+
 
 @pytest.fixture
 def test_rsa_private_key():
@@ -669,9 +703,7 @@ def test_rsa_private_key():
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
 
-    private_key = rsa.generate_private_key(
-        public_exponent=65537, key_size=2048
-    )
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -684,6 +716,7 @@ def test_rsa_private_key():
 
 ```python
 # tests/kalshi/test_orders.py
+
 
 @pytest.mark.asyncio
 async def test_place_order_success(mock_kalshi_client):
@@ -699,6 +732,7 @@ async def test_place_order_success(mock_kalshi_client):
 
     assert result["order"]["status"] == "executed"
     assert result["order"]["order_id"] == "ord-test-123"
+
 
 @pytest.mark.asyncio
 async def test_auth_header_uses_rsa_signature(test_rsa_private_key):
@@ -876,6 +910,7 @@ import pytest
 # Mark all tests in this directory as integration tests
 pytestmark = pytest.mark.integration
 
+
 @pytest.fixture
 def full_pipeline(db, mock_kalshi_client, test_settings):
     """Set up the complete pipeline for end-to-end tests."""
@@ -894,6 +929,7 @@ def full_pipeline(db, mock_kalshi_client, test_settings):
 import pytest
 
 pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_weather_data_produces_valid_predictions(
@@ -971,12 +1007,42 @@ def make_bracket_prediction(
     # Generate brackets centered on mean_temp
     base = int(mean_temp) - 3
     brackets = [
-        BracketProbability(bracket_label=f"<={base}F", lower_bound_f=float('-inf'), upper_bound_f=base, probability=0.08),
-        BracketProbability(bracket_label=f"{base+1}-{base+2}F", lower_bound_f=base+1, upper_bound_f=base+2, probability=0.15),
-        BracketProbability(bracket_label=f"{base+3}-{base+4}F", lower_bound_f=base+3, upper_bound_f=base+4, probability=0.30),
-        BracketProbability(bracket_label=f"{base+5}-{base+6}F", lower_bound_f=base+5, upper_bound_f=base+6, probability=0.28),
-        BracketProbability(bracket_label=f"{base+7}-{base+8}F", lower_bound_f=base+7, upper_bound_f=base+8, probability=0.12),
-        BracketProbability(bracket_label=f">={base+9}F", lower_bound_f=base+9, upper_bound_f=float('inf'), probability=0.07),
+        BracketProbability(
+            bracket_label=f"<={base}F",
+            lower_bound_f=float("-inf"),
+            upper_bound_f=base,
+            probability=0.08,
+        ),
+        BracketProbability(
+            bracket_label=f"{base + 1}-{base + 2}F",
+            lower_bound_f=base + 1,
+            upper_bound_f=base + 2,
+            probability=0.15,
+        ),
+        BracketProbability(
+            bracket_label=f"{base + 3}-{base + 4}F",
+            lower_bound_f=base + 3,
+            upper_bound_f=base + 4,
+            probability=0.30,
+        ),
+        BracketProbability(
+            bracket_label=f"{base + 5}-{base + 6}F",
+            lower_bound_f=base + 5,
+            upper_bound_f=base + 6,
+            probability=0.28,
+        ),
+        BracketProbability(
+            bracket_label=f"{base + 7}-{base + 8}F",
+            lower_bound_f=base + 7,
+            upper_bound_f=base + 8,
+            probability=0.12,
+        ),
+        BracketProbability(
+            bracket_label=f">={base + 9}F",
+            lower_bound_f=base + 9,
+            upper_bound_f=float("inf"),
+            probability=0.07,
+        ),
     ]
 
     data = dict(
@@ -1030,12 +1096,14 @@ def make_trade_signal(
 ```python
 from tests.factories import make_bracket_prediction, make_trade_signal
 
+
 def test_ev_calculator_with_various_spreads():
     """Test EV calculation across multiple probability spreads."""
     for ev in [0.01, 0.05, 0.10, 0.20]:
         signal = make_trade_signal(ev=ev, price_cents=30)
         assert signal.model_probability > signal.market_probability
         assert signal.ev == pytest.approx(ev)
+
 
 def test_prediction_for_all_cities():
     """Test that predictions work for every supported city."""

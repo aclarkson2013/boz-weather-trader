@@ -156,24 +156,40 @@ class StationConfig:
 
 STATION_CONFIGS: dict[str, StationConfig] = {
     "NYC": StationConfig(
-        city="NYC", lat=40.7828, lon=-73.9653,
-        station_id="KNYC", nws_office="OKX",
-        timezone=ZoneInfo("America/New_York"), standard_utc_offset=-5,
+        city="NYC",
+        lat=40.7828,
+        lon=-73.9653,
+        station_id="KNYC",
+        nws_office="OKX",
+        timezone=ZoneInfo("America/New_York"),
+        standard_utc_offset=-5,
     ),
     "CHI": StationConfig(
-        city="CHI", lat=41.7868, lon=-87.7522,
-        station_id="KMDW", nws_office="LOT",
-        timezone=ZoneInfo("America/Chicago"), standard_utc_offset=-6,
+        city="CHI",
+        lat=41.7868,
+        lon=-87.7522,
+        station_id="KMDW",
+        nws_office="LOT",
+        timezone=ZoneInfo("America/Chicago"),
+        standard_utc_offset=-6,
     ),
     "MIA": StationConfig(
-        city="MIA", lat=25.7959, lon=-80.2870,
-        station_id="KMIA", nws_office="MFL",
-        timezone=ZoneInfo("America/New_York"), standard_utc_offset=-5,
+        city="MIA",
+        lat=25.7959,
+        lon=-80.2870,
+        station_id="KMIA",
+        nws_office="MFL",
+        timezone=ZoneInfo("America/New_York"),
+        standard_utc_offset=-5,
     ),
     "AUS": StationConfig(
-        city="AUS", lat=30.1945, lon=-97.6699,
-        station_id="KAUS", nws_office="EWX",
-        timezone=ZoneInfo("America/Chicago"), standard_utc_offset=-6,
+        city="AUS",
+        lat=30.1945,
+        lon=-97.6699,
+        station_id="KAUS",
+        nws_office="EWX",
+        timezone=ZoneInfo("America/Chicago"),
+        standard_utc_offset=-6,
     ),
 }
 
@@ -186,6 +202,7 @@ Grid coordinates are geographic and never change. Look them up once, cache forev
 
 ```python
 # In backend/weather/nws.py
+
 
 async def get_grid_coordinates(city: str) -> dict:
     """Get NWS grid coordinates for a city. Cached after first call.
@@ -262,6 +279,7 @@ GET https://api.open-meteo.com/v1/forecast?latitude=40.7828&longitude=-73.9653&d
 # In backend/weather/openmeteo.py
 
 OPENMETEO_MODELS = ["gfs_seamless", "ecmwf_ifs025", "icon_seamless"]
+
 
 async def fetch_openmeteo_forecast(city: str) -> list[WeatherData]:
     """Fetch forecasts from Open-Meteo for all configured models.
@@ -467,43 +485,51 @@ async def fetch_with_retry(
             await nws_limiter.acquire()
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
-                    url, headers=default_headers, params=params,
+                    url,
+                    headers=default_headers,
+                    params=params,
                 )
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 500 and attempt < max_retries:
-                wait = 2 ** attempt  # 1s, 2s, 4s
+                wait = 2**attempt  # 1s, 2s, 4s
                 logger.warning(
                     "NWS returned 500, retrying",
-                    extra={"data": {
-                        "url": url,
-                        "attempt": attempt + 1,
-                        "wait_seconds": wait,
-                    }},
+                    extra={
+                        "data": {
+                            "url": url,
+                            "attempt": attempt + 1,
+                            "wait_seconds": wait,
+                        }
+                    },
                 )
                 await asyncio.sleep(wait)
             else:
                 logger.error(
                     "HTTP error fetching URL",
-                    extra={"data": {
-                        "url": url,
-                        "status_code": e.response.status_code,
-                        "attempts": attempt + 1,
-                    }},
+                    extra={
+                        "data": {
+                            "url": url,
+                            "status_code": e.response.status_code,
+                            "attempts": attempt + 1,
+                        }
+                    },
                 )
                 raise
         except httpx.RequestError as e:
             if attempt < max_retries:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.warning(
                     "Network error, retrying",
-                    extra={"data": {
-                        "url": url,
-                        "error": str(e),
-                        "attempt": attempt + 1,
-                        "wait_seconds": wait,
-                    }},
+                    extra={
+                        "data": {
+                            "url": url,
+                            "error": str(e),
+                            "attempt": attempt + 1,
+                            "wait_seconds": wait,
+                        }
+                    },
                 )
                 await asyncio.sleep(wait)
             else:
@@ -571,10 +597,12 @@ def fetch_all_forecasts(self):
             nws_data = async_to_sync(fetch_nws_forecast)(city)
             logger.info(
                 "Fetched NWS forecast",
-                extra={"data": {
-                    "city": city,
-                    "high_f": nws_data.forecast_high_f,
-                }},
+                extra={
+                    "data": {
+                        "city": city,
+                        "high_f": nws_data.forecast_high_f,
+                    }
+                },
             )
         except Exception as exc:
             logger.error(
@@ -587,10 +615,12 @@ def fetch_all_forecasts(self):
             om_data = async_to_sync(fetch_openmeteo_forecast)(city)
             logger.info(
                 "Fetched Open-Meteo forecast",
-                extra={"data": {
-                    "city": city,
-                    "high_f": om_data[0].forecast_high_f if om_data else None,
-                }},
+                extra={
+                    "data": {
+                        "city": city,
+                        "high_f": om_data[0].forecast_high_f if om_data else None,
+                    }
+                },
             )
         except Exception as exc:
             logger.error(
@@ -664,8 +694,7 @@ class StaleDataError(WeatherError):
         self.city = city
         self.age_minutes = age_minutes
         super().__init__(
-            f"Weather data for {city} is {age_minutes:.0f} minutes old "
-            f"(threshold: 120 minutes)"
+            f"Weather data for {city} is {age_minutes:.0f} minutes old (threshold: 120 minutes)"
         )
 
 
@@ -722,11 +751,7 @@ def normalize_nws_gridpoint(city: str, raw_response: dict) -> WeatherData | None
     """
     from backend.weather.normalizer import celsius_to_fahrenheit
 
-    max_temps = (
-        raw_response.get("properties", {})
-        .get("maxTemperature", {})
-        .get("values", [])
-    )
+    max_temps = raw_response.get("properties", {}).get("maxTemperature", {}).get("values", [])
     if not max_temps:
         return None
 
@@ -805,9 +830,7 @@ NWS_FORECAST_RESPONSE = {
 NWS_GRIDPOINT_RESPONSE = {
     "properties": {
         "maxTemperature": {
-            "values": [
-                {"validTime": "2026-02-17T11:00:00+00:00/PT1H", "value": 12.8}
-            ]
+            "values": [{"validTime": "2026-02-17T11:00:00+00:00/PT1H", "value": 12.8}]
         }
     }
 }

@@ -172,12 +172,17 @@ def calculate_ensemble_forecast(
     ensemble_temp = weighted_sum / weight_total
     spread = max(temps) - min(temps)
 
-    logger.info("Ensemble calculated", extra={"data": {
-        "ensemble_f": round(ensemble_temp, 1),
-        "spread_f": round(spread, 1),
-        "sources": sources,
-        "individual_temps": [round(t, 1) for t in temps],
-    }})
+    logger.info(
+        "Ensemble calculated",
+        extra={
+            "data": {
+                "ensemble_f": round(ensemble_temp, 1),
+                "spread_f": round(spread, 1),
+                "sources": sources,
+                "individual_temps": [round(t, 1) for t in temps],
+            }
+        },
+    )
 
     return ensemble_temp, spread, sources
 ```
@@ -282,10 +287,13 @@ async def calculate_error_std(
                 WeatherForecast.forecast_high_f,
                 Settlement.actual_high_f,
             )
-            .join(Settlement, (
-                (WeatherForecast.city == Settlement.city)
-                & (WeatherForecast.target_date == Settlement.date)
-            ))
+            .join(
+                Settlement,
+                (
+                    (WeatherForecast.city == Settlement.city)
+                    & (WeatherForecast.target_date == Settlement.date)
+                ),
+            )
             .where(WeatherForecast.city == city)
             .where(WeatherForecast.source == "NWS")  # compare NWS forecasts to actuals
             .where(Settlement.actual_high_f.isnot(None))
@@ -302,36 +310,56 @@ async def calculate_error_std(
 
         if len(errors) >= min_samples:
             error_std = float(np.std(errors, ddof=1))  # sample std dev
-            logger.info("Calculated historical error std", extra={"data": {
-                "city": city,
-                "season": season,
-                "std_f": round(error_std, 2),
-                "sample_count": len(errors),
-            }})
+            logger.info(
+                "Calculated historical error std",
+                extra={
+                    "data": {
+                        "city": city,
+                        "season": season,
+                        "std_f": round(error_std, 2),
+                        "sample_count": len(errors),
+                    }
+                },
+            )
             return error_std
         else:
-            logger.info("Insufficient historical data for error std", extra={"data": {
-                "city": city,
-                "season": season,
-                "sample_count": len(errors),
-                "min_required": min_samples,
-            }})
+            logger.info(
+                "Insufficient historical data for error std",
+                extra={
+                    "data": {
+                        "city": city,
+                        "season": season,
+                        "sample_count": len(errors),
+                        "min_required": min_samples,
+                    }
+                },
+            )
 
     except Exception as e:
-        logger.warning("Error querying historical data, using fallback", extra={"data": {
-            "city": city,
-            "season": season,
-            "error": str(e),
-        }})
+        logger.warning(
+            "Error querying historical data, using fallback",
+            extra={
+                "data": {
+                    "city": city,
+                    "season": season,
+                    "error": str(e),
+                }
+            },
+        )
 
     # Fall back to hardcoded estimates
     fallback = FALLBACK_ERROR_STD.get(city, {}).get(season, 2.5)
-    logger.info("Using fallback error std", extra={"data": {
-        "city": city,
-        "season": season,
-        "std_f": fallback,
-        "reason": "insufficient_data",
-    }})
+    logger.info(
+        "Using fallback error std",
+        extra={
+            "data": {
+                "city": city,
+                "season": season,
+                "std_f": fallback,
+                "reason": "insufficient_data",
+            }
+        },
+    )
     return fallback
 ```
 
@@ -447,12 +475,14 @@ def calculate_bracket_probabilities(
         else:
             prob = 0.0  # should never happen
 
-        results.append(BracketProbability(
-            bracket_label=bracket["label"],
-            lower_bound_f=lower,
-            upper_bound_f=upper,
-            probability=max(0.0, min(1.0, prob)),  # clamp to [0, 1]
-        ))
+        results.append(
+            BracketProbability(
+                bracket_label=bracket["label"],
+                lower_bound_f=lower,
+                upper_bound_f=upper,
+                probability=max(0.0, min(1.0, prob)),  # clamp to [0, 1]
+            )
+        )
 
     # Normalize to ensure sum == 1.0 (handles floating point drift)
     total = sum(r.probability for r in results)
@@ -460,13 +490,18 @@ def calculate_bracket_probabilities(
         for r in results:
             r.probability = r.probability / total
 
-    logger.info("Bracket probabilities calculated", extra={"data": {
-        "ensemble_f": round(ensemble_forecast_f, 1),
-        "error_std_f": round(error_std_f, 2),
-        "bracket_count": len(results),
-        "probabilities": [round(r.probability, 4) for r in results],
-        "sum_check": round(sum(r.probability for r in results), 6),
-    }})
+    logger.info(
+        "Bracket probabilities calculated",
+        extra={
+            "data": {
+                "ensemble_f": round(ensemble_forecast_f, 1),
+                "error_std_f": round(error_std_f, 2),
+                "bracket_count": len(results),
+                "probabilities": [round(r.probability, 4) for r in results],
+                "sum_check": round(sum(r.probability for r in results), 6),
+            }
+        },
+    )
 
     return results
 ```
@@ -596,7 +631,8 @@ async def generate_prediction(
     """
     # Step 1: Ensemble forecast
     ensemble_temp, spread, sources = calculate_ensemble_forecast(
-        forecasts, weights=model_weights,
+        forecasts,
+        weights=model_weights,
     )
 
     # Step 2: Historical error distribution
@@ -638,15 +674,20 @@ async def generate_prediction(
         generated_at=now,
     )
 
-    logger.info("Prediction generated", extra={"data": {
-        "city": city,
-        "date": str(target_date),
-        "ensemble_f": prediction.ensemble_forecast_f,
-        "confidence": confidence,
-        "spread_f": prediction.forecast_spread_f,
-        "error_std_f": prediction.error_std_f,
-        "sources": sources,
-    }})
+    logger.info(
+        "Prediction generated",
+        extra={
+            "data": {
+                "city": city,
+                "date": str(target_date),
+                "ensemble_f": prediction.ensemble_forecast_f,
+                "confidence": confidence,
+                "spread_f": prediction.forecast_spread_f,
+                "error_std_f": prediction.error_std_f,
+                "sources": sources,
+            }
+        },
+    )
 
     return prediction
 ```
@@ -657,20 +698,21 @@ Your output MUST conform to `BracketPrediction` in `backend/common/schemas.py`:
 
 ```python
 class BracketProbability(BaseModel):
-    bracket_label: str           # e.g. "53-55" or "<51" or ">=59"
+    bracket_label: str  # e.g. "53-55" or "<51" or ">=59"
     lower_bound_f: float | None  # None for bottom edge bracket
     upper_bound_f: float | None  # None for top edge bracket
-    probability: float           # 0.0 to 1.0
+    probability: float  # 0.0 to 1.0
+
 
 class BracketPrediction(BaseModel):
     city: str
     date: date
     brackets: list[BracketProbability]  # 6 items, probabilities sum to 1.0
-    ensemble_forecast_f: float          # weighted ensemble temp
+    ensemble_forecast_f: float  # weighted ensemble temp
     confidence: Literal["HIGH", "MEDIUM", "LOW"]
-    model_sources: list[str]            # which models contributed
-    forecast_spread_f: float            # max - min across models
-    error_std_f: float                  # historical error std dev used
+    model_sources: list[str]  # which models contributed
+    forecast_spread_f: float  # max - min across models
+    error_std_f: float  # historical error std dev used
     generated_at: datetime
 ```
 
@@ -744,21 +786,24 @@ def generate_postmortem_narrative(trade: TradeRecord, settlement_temp_f: float) 
     if closest_model:
         lines.append(f"  - Closest model: {closest_model} (off by {closest_error:.1f} F)")
     if forecasts:
-        ensemble = (
-            trade.prediction.ensemble_forecast_f if trade.prediction else "N/A"
-        )
+        ensemble = trade.prediction.ensemble_forecast_f if trade.prediction else "N/A"
         lines.append(f"  - Ensemble forecast: {ensemble} F")
         lines.append(f"  - Actual: {settlement_temp_f:.0f} F")
 
     narrative = "\n".join(lines)
 
-    logger.info("Post-mortem generated", extra={"data": {
-        "trade_id": trade.id,
-        "city": trade.city,
-        "result": "WIN" if won else "LOSS",
-        "closest_model": closest_model,
-        "closest_error_f": round(closest_error, 1) if closest_model else None,
-    }})
+    logger.info(
+        "Post-mortem generated",
+        extra={
+            "data": {
+                "trade_id": trade.id,
+                "city": trade.city,
+                "result": "WIN" if won else "LOSS",
+                "closest_model": closest_model,
+                "closest_error_f": round(closest_error, 1) if closest_model else None,
+            }
+        },
+    )
 
     return narrative
 ```
@@ -773,26 +818,31 @@ from __future__ import annotations
 
 class PredictionError(Exception):
     """Base exception for prediction module errors."""
+
     pass
 
 
 class InsufficientDataError(PredictionError):
     """Raised when there is not enough data to generate a prediction."""
+
     pass
 
 
 class EnsembleError(PredictionError):
     """Raised when ensemble calculation fails (no sources, all weights zero)."""
+
     pass
 
 
 class BracketError(PredictionError):
     """Raised when bracket probability calculation fails."""
+
     pass
 
 
 class CalibrationError(PredictionError):
     """Raised when calibration process encounters an error."""
+
     pass
 ```
 
@@ -1040,19 +1090,19 @@ def test_ensemble_unknown_source_gets_default_weight():
 def test_confidence_high():
     result = assess_confidence(
         forecast_spread_f=0.5,  # tight: +3
-        error_std_f=1.5,       # low: +2
-        num_sources=5,          # many: +1
-        data_age_minutes=30,    # fresh: +1
+        error_std_f=1.5,  # low: +2
+        num_sources=5,  # many: +1
+        data_age_minutes=30,  # fresh: +1
     )
     assert result == "HIGH"  # score = 7
 
 
 def test_confidence_low():
     result = assess_confidence(
-        forecast_spread_f=5.0,   # wide: +0
-        error_std_f=4.0,        # high: +0
-        num_sources=2,           # few: +0
-        data_age_minutes=180,    # stale: -1
+        forecast_spread_f=5.0,  # wide: +0
+        error_std_f=4.0,  # high: +0
+        num_sources=2,  # few: +0
+        data_age_minutes=180,  # stale: -1
     )
     assert result == "LOW"  # score = -1
 
@@ -1060,9 +1110,9 @@ def test_confidence_low():
 def test_confidence_medium():
     result = assess_confidence(
         forecast_spread_f=2.0,  # ok: +2
-        error_std_f=2.5,       # ok: +1
-        num_sources=3,          # few: +0
-        data_age_minutes=90,    # ok: +0
+        error_std_f=2.5,  # ok: +1
+        num_sources=3,  # few: +0
+        data_age_minutes=90,  # ok: +0
     )
     assert result == "MEDIUM"  # score = 3
 ```
