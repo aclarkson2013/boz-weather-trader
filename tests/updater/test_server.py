@@ -6,6 +6,7 @@ without actually running the HTTP server.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -177,11 +178,15 @@ class TestGetStatus:
 class TestUpdateTimeout:
     """Tests for the configurable update timeout (v1.9.13)."""
 
-    def test_default_timeout_is_thirty_minutes(self):
-        """Default must be 1800s — the old 600s killed real deploys
-        mid-build (backend + frontend routinely exceed 10 min on
-        homelab hardware)."""
-        assert updater_server.UPDATE_TIMEOUT_SECONDS == 1800
+    def test_default_timeout_is_sixty_minutes(self):
+        """Default must be 3600s.
+
+        600s killed deploys mid-build (v1.9.12); 1800s was still too short —
+        the v1.9.14 deploy spent ~28 min in the frontend buildx build and was
+        killed before it could restart anything. The VM has 4 cores / 4 GB, so
+        a cold Next.js build is slow by nature rather than hung.
+        """
+        assert updater_server.UPDATE_TIMEOUT_SECONDS == 3600
 
     def test_timeout_is_env_configurable(self):
         """UPDATE_TIMEOUT_SECONDS env var overrides the default."""
@@ -194,17 +199,66 @@ class TestUpdateTimeout:
         importlib.reload(updater_server)
 
     def test_run_update_uses_configured_timeout(self):
-        """subprocess.run must receive the configured timeout."""
+        """proc.wait() must receive the configured timeout."""
         with (
             patch.object(updater_server, "_update_lock") as mock_lock,
-            patch("server.subprocess.run") as mock_run,
+            patch("server.subprocess.Popen") as mock_popen,
         ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            proc = MagicMock()
+            proc.stdout = io.StringIO("")
+            proc.wait.return_value = 0
+            mock_popen.return_value = proc
             updater_server._run_update()
 
         mock_lock.release.assert_called_once()
-        _, kwargs = mock_run.call_args
+        _, kwargs = proc.wait.call_args
         assert kwargs["timeout"] == updater_server.UPDATE_TIMEOUT_SECONDS
+
+    def test_output_is_streamed_not_buffered(self):
+        """Script output must be logged live.
+
+        With the old capture_output=True the buffered output was discarded on
+        timeout, so the 30-minute v1.9.14 hang produced zero log lines and
+        there was no way to see which step was stuck.
+        """
+        with (
+            patch.object(updater_server, "_update_lock"),
+            patch("server.subprocess.Popen") as mock_popen,
+            patch.object(updater_server.logger, "info") as mock_info,
+        ):
+            proc = MagicMock()
+            proc.stdout = io.StringIO("=== Step 1/4 ===\nbuilding backend\n")
+            proc.wait.return_value = 0
+            mock_popen.return_value = proc
+            updater_server._run_update()
+
+        _, kwargs = mock_popen.call_args
+        assert kwargs["stdout"] is updater_server.subprocess.PIPE
+        assert kwargs["stderr"] is updater_server.subprocess.STDOUT
+        logged = " ".join(str(c) for c in mock_info.call_args_list)
+        assert "Step 1/4" in logged
+        assert "building backend" in logged
+
+    def test_timeout_kills_the_script(self):
+        """Popen does not kill on timeout the way subprocess.run does.
+
+        Without an explicit kill the script keeps driving the same Docker
+        daemon while the next attempt starts.
+        """
+        import subprocess as sp
+
+        with (
+            patch.object(updater_server, "_update_lock"),
+            patch("server.subprocess.Popen") as mock_popen,
+            patch.object(updater_server, "STATUS_FILE", os.devnull),
+        ):
+            proc = MagicMock()
+            proc.stdout = io.StringIO("")
+            proc.wait.side_effect = [sp.TimeoutExpired(cmd="update.sh", timeout=1), None]
+            mock_popen.return_value = proc
+            updater_server._run_update()
+
+        proc.kill.assert_called_once()
 
 
 class TestUpdateScript:
@@ -234,3 +288,27 @@ class TestUpdateScript:
         """A successful run must record HEAD for next-run change detection."""
         content = self._read()
         assert ".updater_last_deployed" in content
+
+    def test_falls_back_to_pre_pull_head_when_marker_missing(self):
+        """The skip logic must not depend on a file that may never exist.
+
+        The marker is only written after a *successful* update, so a deploy
+        done another way (manual SSH, or an update that timed out) leaves it
+        missing forever — and with no baseline the script rebuilds everything.
+        That is what burned the whole window on the 2026-08-21 v1.9.14 deploy,
+        which needed no frontend build at all.
+        """
+        content = self._read()
+        assert "PRE_PULL_HEAD" in content
+        # Captured before the pull, or it would just equal the new HEAD.
+        assert content.index("PRE_PULL_HEAD=") < content.index("git pull origin master")
+
+    def test_pre_pull_fallback_requires_head_to_have_moved(self):
+        """If HEAD did not move and there is no marker, rebuild everything.
+
+        A previous run that pulled and then died before building leaves the
+        working tree ahead of what is actually deployed; treating that as the
+        baseline would skip a build that never ran.
+        """
+        content = self._read()
+        assert '"$PRE_PULL_HEAD" != "$NEW_HEAD"' in content

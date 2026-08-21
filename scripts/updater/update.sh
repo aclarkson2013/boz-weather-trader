@@ -53,14 +53,37 @@ cd "$PROJECT_DIR"
 DEPLOYED_REF_FILE="${PROJECT_DIR}/.updater_last_deployed"
 LAST_DEPLOYED=$(cat "$DEPLOYED_REF_FILE" 2>/dev/null || echo "")
 
+# The commit that is running right now, captured BEFORE the pull. This is the
+# bootstrap fallback for the change detection below: the marker file is only
+# written after a *successful* update, so a deploy done any other way (manual
+# SSH, or an update that timed out) leaves it missing forever — and with no
+# baseline the script rebuilds everything, which is what caused the 2026-08-21
+# v1.9.14 timeout. The pre-pull HEAD is exactly the same information, so the
+# skip logic no longer depends on a file that may never exist.
+PRE_PULL_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+
 # Step 1: Git pull
-printf "=== Step 1/3: Pulling latest code ===\n"
+printf "=== Step 1/4: Pulling latest code ===\n"
 write_status "pulling" "git pull"
 if ! git pull origin master; then
     write_status "error" "git pull" "\"git pull failed — check remote connectivity and branch status\""
     exit 1
 fi
 NEW_HEAD=$(git rev-parse HEAD)
+
+# Prefer the recorded marker; fall back to the pre-pull HEAD, but ONLY when the
+# pull actually advanced. If HEAD did not move and we have no marker, a previous
+# run pulled and then died before building (exactly the v1.9.14 timeout), so the
+# working tree is ahead of what is actually deployed — treating it as the
+# baseline would skip a build that never ran. No baseline => build everything.
+if [ -z "$LAST_DEPLOYED" ]; then
+    if [ -n "$PRE_PULL_HEAD" ] && [ "$PRE_PULL_HEAD" != "$NEW_HEAD" ]; then
+        LAST_DEPLOYED="$PRE_PULL_HEAD"
+        printf "No deploy marker — using pre-pull HEAD %s as baseline\n" "$PRE_PULL_HEAD"
+    else
+        printf "No deploy marker and HEAD unchanged — rebuilding everything (safe default)\n"
+    fi
+fi
 
 # Decide whether the frontend actually changed since the last successful
 # deploy. The frontend buildx build is the slowest step by far; skipping

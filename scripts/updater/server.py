@@ -24,10 +24,16 @@ UPDATER_SECRET = os.environ.get("UPDATER_SECRET", "changeme")
 STATUS_FILE = "/tmp/update_status.json"
 PORT = 9999
 
-# Update timeout. The old 600s default killed real updates mid-build:
-# a cold backend build plus the frontend buildx build routinely exceeds
-# 10 minutes on homelab hardware (observed 2026-08-06, v1.9.12 deploy).
-UPDATE_TIMEOUT_SECONDS = int(os.environ.get("UPDATE_TIMEOUT_SECONDS", "1800"))
+# Update timeout. History:
+#   600s  — killed real updates mid-build (v1.9.12 deploy, 2026-08-06).
+#   1800s — still too short for a cold frontend build: the v1.9.14 deploy
+#           (2026-08-21) spent ~28 min in `docker buildx build` for the
+#           frontend and was killed before it could restart anything.
+# The homelab VM has 4 cores and 4 GB RAM, so a cold Next.js production build
+# inside BuildKit is slow by nature rather than hung. 3600s gives it room.
+# Most updates never approach this: the change detection in update.sh skips
+# the frontend build entirely when frontend/ is untouched.
+UPDATE_TIMEOUT_SECONDS = int(os.environ.get("UPDATE_TIMEOUT_SECONDS", "3600"))
 
 # Global lock to prevent concurrent updates
 _update_lock = threading.Lock()
@@ -42,29 +48,58 @@ def _read_status() -> dict:
         return {"status": "idle", "step": None, "error": None, "started_at": None}
 
 
-def _run_update() -> None:
-    """Execute the update script in a background thread."""
-    logger.info("Starting update process...")
+def _stream_output(pipe) -> None:  # noqa: ANN001
+    """Log each line of the update script's output as it is produced.
+
+    The script's progress must be logged *live*, not collected at exit: with
+    the old ``capture_output=True`` the buffered output was discarded on
+    timeout, so a 30-minute hang produced zero log lines and there was no way
+    to tell which step was stuck (observed 2026-08-21, v1.9.14 deploy).
+    """
     try:
-        result = subprocess.run(
+        for line in iter(pipe.readline, ""):
+            line = line.rstrip()
+            if line:
+                logger.info("update | %s", line)
+    finally:
+        pipe.close()
+
+
+def _run_update() -> None:
+    """Execute the update script in a background thread, streaming its output."""
+    logger.info("Starting update process...")
+    proc = None
+    try:
+        proc = subprocess.Popen(  # noqa: S603
             ["/updater/update.sh"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=UPDATE_TIMEOUT_SECONDS,
+            bufsize=1,
         )
-        if result.returncode != 0:
-            logger.error(
-                "Update failed (exit %d)\nstdout: %s\nstderr: %s",
-                result.returncode,
-                result.stdout[-1000:] if result.stdout else "(empty)",
-                result.stderr[-1000:] if result.stderr else "(empty)",
-            )
+        reader = threading.Thread(target=_stream_output, args=(proc.stdout,), daemon=True)
+        reader.start()
+
+        returncode = proc.wait(timeout=UPDATE_TIMEOUT_SECONDS)
+        reader.join(timeout=5)
+
+        if returncode != 0:
+            logger.error("Update failed (exit %d) — see streamed output above", returncode)
         else:
             logger.info("Update completed successfully")
-            logger.info("stdout: %s", result.stdout[-500:] if result.stdout else "")
     except subprocess.TimeoutExpired:
-        logger.error("Update timed out after %d seconds", UPDATE_TIMEOUT_SECONDS)
-        # Write error status
+        logger.error(
+            "Update timed out after %d seconds — killing update.sh", UPDATE_TIMEOUT_SECONDS
+        )
+        # Popen does not kill on timeout the way subprocess.run does, so the
+        # script would otherwise keep running against the same Docker daemon
+        # while the next update attempt starts.
+        if proc is not None:
+            proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.error("update.sh did not die after kill()")
         status = {
             "status": "error",
             "step": "timeout",
