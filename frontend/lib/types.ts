@@ -8,6 +8,15 @@
 // ─── Literal Types ───
 
 export type CityCode = "NYC" | "CHI" | "MIA" | "AUS";
+
+/** Forecast feeds the weather pipeline can fetch. Which ones are blended into
+ *  the ensemble is user-configurable — see Settings.enabled_weather_sources. */
+export type WeatherSourceName =
+  | "NWS"
+  | "NWS:gridpoint"
+  | "Open-Meteo:ECMWF"
+  | "Open-Meteo:GFS"
+  | "Open-Meteo:ICON";
 export type TradeSide = "yes" | "no";
 export type ConfidenceLevel = "high" | "medium" | "low";
 export type TradeStatus = "OPEN" | "RESTING" | "WON" | "LOST" | "CANCELED";
@@ -137,6 +146,7 @@ export interface UserSettings {
   cooldown_per_loss_minutes: number;
   consecutive_loss_limit: number;
   active_cities: CityCode[];
+  enabled_weather_sources: WeatherSourceName[];
   notifications_enabled: boolean;
   max_contracts_per_bracket: number;
   enable_consecutive_loss_limit: boolean;
@@ -162,6 +172,7 @@ export interface SettingsUpdate {
   cooldown_per_loss_minutes?: number;
   consecutive_loss_limit?: number;
   active_cities?: CityCode[];
+  enabled_weather_sources?: WeatherSourceName[];
   notifications_enabled?: boolean;
   demo_mode?: boolean;
   max_contracts_per_bracket?: number;

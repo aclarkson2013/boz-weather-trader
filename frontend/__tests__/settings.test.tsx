@@ -47,6 +47,7 @@ const MOCK_SETTINGS: UserSettings = {
   cooldown_per_loss_minutes: 60,
   consecutive_loss_limit: 3,
   active_cities: ["NYC", "CHI", "MIA", "AUS"],
+  enabled_weather_sources: ["NWS:gridpoint", "Open-Meteo:GFS", "Open-Meteo:ICON"],
   notifications_enabled: true,
   max_contracts_per_bracket: 3,
   enable_consecutive_loss_limit: true,
@@ -670,5 +671,80 @@ describe("SettingsPage", () => {
         );
       });
     });
+  });
+});
+
+
+describe("SettingsPage — weather sources", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseSettings.mockReturnValue({
+      settings: MOCK_SETTINGS,
+      isLoading: false,
+      error: undefined,
+    });
+    mockUseAuthStatus.mockReturnValue({ status: undefined, isLoading: false });
+    mockUseVersion.mockReturnValue({ version: undefined, isLoading: false });
+    mockUseLogs.mockReturnValue({ logs: [], isLoading: false, error: undefined });
+    mockUpdateSettings.mockResolvedValue(MOCK_SETTINGS);
+  });
+
+  it("renders a toggle for every weather source", () => {
+    render(<SettingsPage />);
+    for (const source of [
+      "NWS",
+      "NWS:gridpoint",
+      "Open-Meteo:ECMWF",
+      "Open-Meteo:GFS",
+      "Open-Meteo:ICON",
+    ]) {
+      expect(screen.getByTestId(`weather-source-${source}`)).toBeInTheDocument();
+    }
+  });
+
+  it("marks only the enabled sources as pressed", () => {
+    render(<SettingsPage />);
+    expect(
+      screen.getByTestId("weather-source-Open-Meteo:ICON"),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("weather-source-NWS")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("enabling a disabled source includes it in the save payload", async () => {
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("weather-source-Open-Meteo:ECMWF"));
+    fireEvent.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalled();
+    });
+    const payload = mockUpdateSettings.mock.calls[0][0];
+    expect(payload.enabled_weather_sources).toContain("Open-Meteo:ECMWF");
+  });
+
+  it("disabling a source removes it from the save payload", async () => {
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("weather-source-Open-Meteo:GFS"));
+    fireEvent.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalled();
+    });
+    const payload = mockUpdateSettings.mock.calls[0][0];
+    expect(payload.enabled_weather_sources).not.toContain("Open-Meteo:GFS");
+  });
+
+  it("blocks dropping below the two-source minimum", () => {
+    render(<SettingsPage />);
+    // 3 enabled -> disable one, leaving 2 (the minimum)
+    fireEvent.click(screen.getByTestId("weather-source-Open-Meteo:GFS"));
+    // The remaining two must now be disabled controls
+    const icon = screen.getByTestId("weather-source-Open-Meteo:ICON");
+    expect(icon).toBeDisabled();
+    fireEvent.click(icon);
+    expect(icon).toHaveAttribute("aria-pressed", "true");
   });
 });

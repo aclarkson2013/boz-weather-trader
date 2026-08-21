@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -26,7 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.common.database import get_task_session, reset_engine
 from backend.common.logging import get_logger
 from backend.common.models import CityEnum, Prediction, User, WeatherForecast
-from backend.common.schemas import WeatherData, WeatherVariables
+from backend.common.schemas import (
+    WeatherData,
+    WeatherVariables,
+    parse_enabled_weather_sources,
+)
 from backend.kalshi.markets import build_event_ticker, parse_event_markets
 from backend.prediction.pipeline import generate_prediction
 from backend.websocket.events import publish_event_sync
@@ -227,6 +232,37 @@ async def _store_prediction(
     session.add(pred_orm)
 
 
+def _dedupe_and_filter_sources(
+    forecast_orms: Sequence[WeatherForecast],
+    enabled_sources: set[str],
+) -> tuple[list[WeatherForecast], list[str]]:
+    """Keep the newest forecast per source, dropping disabled sources.
+
+    ``forecast_orms`` must already be ordered newest-first, so the first row
+    seen for a source is the one kept.
+
+    Args:
+        forecast_orms: Forecast rows for one city/date, newest first.
+        enabled_sources: Source names allowed into the ensemble.
+
+    Returns:
+        A ``(kept, excluded)`` tuple — the forecasts to blend, and the names
+        of the distinct sources that were dropped because they are disabled.
+    """
+    seen: set[str] = set()
+    kept: list[WeatherForecast] = []
+    excluded: list[str] = []
+    for orm in forecast_orms:
+        if orm.source in seen:
+            continue
+        seen.add(orm.source)
+        if orm.source not in enabled_sources:
+            excluded.append(orm.source)
+            continue
+        kept.append(orm)
+    return kept, excluded
+
+
 # ─── Async Orchestration ───
 
 
@@ -236,9 +272,14 @@ async def _generate_predictions_async() -> dict:
     For each city and target date (today + tomorrow in ET):
     1. Load latest weather forecasts from the database
     2. Deduplicate by source (keep latest per source)
-    3. Fetch Kalshi bracket definitions (API or fallback)
-    4. Run the prediction pipeline
-    5. Store the result as a Prediction ORM record
+    3. Drop sources the user has disabled (UserSettings.enabled_weather_sources)
+    4. Fetch Kalshi bracket definitions (API or fallback)
+    5. Run the prediction pipeline
+    6. Store the result as a Prediction ORM record
+
+    Disabled sources are still fetched and stored by the weather pipeline —
+    they are only excluded here, so /api/accuracy/sources keeps scoring them
+    and re-enabling one is backed by continuous history.
 
     Returns:
         Dict with counts: generated, skipped, errors.
@@ -263,6 +304,20 @@ async def _generate_predictions_async() -> dict:
 
         cities = ["NYC", "CHI", "MIA", "AUS"]
 
+        # Which forecast feeds are allowed into the ensemble. Falls back to the
+        # default set when there is no user row yet (first boot / onboarding).
+        result = await session.execute(select(User).limit(1))
+        settings_user = result.scalar_one_or_none()
+        enabled_sources = set(
+            parse_enabled_weather_sources(
+                settings_user.enabled_weather_sources if settings_user else None
+            )
+        )
+        logger.info(
+            "Enabled weather sources for this cycle",
+            extra={"data": {"sources": sorted(enabled_sources)}},
+        )
+
         for city in cities:
             for target_date in target_dates:
                 try:
@@ -286,13 +341,11 @@ async def _generate_predictions_async() -> dict:
                         skipped += 1
                         continue
 
-                    # Deduplicate: keep latest forecast per source
-                    seen_sources: set[str] = set()
-                    unique_forecasts = []
-                    for orm in forecast_orms:
-                        if orm.source not in seen_sources:
-                            seen_sources.add(orm.source)
-                            unique_forecasts.append(orm)
+                    # Deduplicate: keep latest forecast per source, and drop
+                    # sources the user has disabled.
+                    unique_forecasts, excluded = _dedupe_and_filter_sources(
+                        forecast_orms, enabled_sources
+                    )
 
                     # Convert ORM → schema
                     forecasts = [_forecast_orm_to_schema(f) for f in unique_forecasts]
@@ -305,6 +358,7 @@ async def _generate_predictions_async() -> dict:
                                     "city": city,
                                     "date": str(target_date),
                                     "sources": len(forecasts),
+                                    "excluded_disabled": excluded,
                                 }
                             },
                         )

@@ -6,7 +6,7 @@ configuration, risk limits, and notification preferences.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.deps import get_current_user, user_to_settings
@@ -14,7 +14,11 @@ from backend.api.response_schemas import SettingsUpdate
 from backend.common.database import get_db
 from backend.common.logging import get_logger
 from backend.common.models import User
-from backend.common.schemas import UserSettings
+from backend.common.schemas import (
+    ALL_WEATHER_SOURCES,
+    MIN_ENABLED_WEATHER_SOURCES,
+    UserSettings,
+)
 
 logger = get_logger("API")
 
@@ -45,7 +49,8 @@ async def update_settings(
     """Partially update user settings.
 
     Only fields included in the request body (non-None) are updated.
-    The active_cities list is stored as a comma-separated string.
+    The active_cities and enabled_weather_sources lists are stored as
+    comma-separated strings.
 
     Args:
         updates: Partial settings update with only changed fields.
@@ -62,6 +67,19 @@ async def update_settings(
         if field_name == "active_cities":
             # Convert list of city codes to comma-separated string
             user.active_cities = ",".join(value)
+        elif field_name == "enabled_weather_sources":
+            # Stored comma-separated, same as active_cities. Preserve the
+            # canonical order so the value is stable regardless of click order.
+            ordered = [s for s in ALL_WEATHER_SOURCES if s in set(value)]
+            if len(ordered) < MIN_ENABLED_WEATHER_SOURCES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"At least {MIN_ENABLED_WEATHER_SOURCES} weather sources must "
+                        "stay enabled — the ensemble needs a spread."
+                    ),
+                )
+            user.enabled_weather_sources = ",".join(ordered)
         else:
             setattr(user, field_name, value)
 

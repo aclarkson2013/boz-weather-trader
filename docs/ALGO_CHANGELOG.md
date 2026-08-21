@@ -14,7 +14,8 @@
 
 ## Current state (as of last review 2026-08-21)
 
-- **Deployed version:** v1.9.13 live on the VM; **v1.9.14 built but NOT yet deployed**
+- **Deployed version:** **v1.9.15 live on the VM** (v1.9.14 = the calibration cache fix, deployed
+  2026-08-21; v1.9.15 = updater fixes only, no algo change). **v1.9.16 built but NOT yet deployed.**
 - **Balance:** $80.27 (was $78.06 on 2026-08-06)
 - **Verdict:** The v1.9.12 bracket-bounds fix is **verified correct and live**, but it did **not**
   restore the edge. Era E (Aug 7-21) is still all-NO and still losing on a small sample.
@@ -34,6 +35,30 @@
 ---
 
 ## Change history (algo-affecting)
+
+### v1.9.16 — Weather-source toggles; default to a 3-source ensemble (2026-08-21)
+- **Files:** `backend/common/schemas.py`, `backend/common/models.py`,
+  `backend/api/{deps,settings,response_schemas}.py`, `backend/prediction/scheduler.py`,
+  `alembic/versions/0019_add_enabled_weather_sources.py`, `frontend/app/settings/page.tsx`
+- **What:** new `UserSettings.enabled_weather_sources` (DB column, API field, Settings UI
+  toggles), defaulting to the three-source working set **NWS:gridpoint + Open-Meteo:GFS +
+  Open-Meteo:ICON**. The prediction scheduler filters forecasts to the enabled set before the
+  ensemble. A floor of 2 sources is enforced in the schema, the API (422), and the UI.
+- **Why:** the 2026-08-21 source review. NWS and NWS:gridpoint are effectively one feed (error
+  correlation 0.983, level correlation 0.9967, identical on 80% of days, mean |diff| 0.32 °F) yet
+  held **45.5% of ensemble weight combined**, so NWS was being double-counted. ECMWF was the
+  weakest member — dropping it slightly *improved* MAE. Only ICON's removal significantly hurt the
+  ensemble (+0.047 °F RMSE, *p* = 0.004). The best 3-source subset beat all five (RMSE 4.098 vs
+  4.135).
+- **Expected effect:** ensemble RMSE flat-to-slightly-better; NWS no longer double-weighted.
+  Because the differences are small (~0.04 °F) and not individually significant, do **not** expect
+  a visible P&L signal from this alone — the win is a less redundant, better-understood ensemble.
+- **Reversible by design:** disabled sources are still **fetched, stored, and scored** by
+  `/api/accuracy/sources`. Only the ensemble skips them, so re-enabling one later is backed by
+  continuous history rather than a gap.
+- **Deploy note:** requires Alembic migration `0019` (adds `users.enabled_weather_sources` and
+  backfills existing rows). The v1.9.15 backend reads that column, so the migration must run
+  before the new code serves traffic.
 
 ### v1.9.14 — Fix cross-process model-cache staleness (2026-08-21)
 - **Files:** `backend/prediction/pipeline.py`

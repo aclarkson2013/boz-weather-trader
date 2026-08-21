@@ -34,6 +34,63 @@ UTCDatetime = Annotated[datetime, PlainSerializer(_serialize_utc, return_type=st
 # ─── City Type ───
 
 CityCode = Literal["NYC", "CHI", "MIA", "AUS"]
+
+# ─── Weather Source Type ───
+# The five forecast feeds the weather pipeline can fetch. Which of them
+# actually reach the ensemble is user-configurable — see
+# UserSettings.enabled_weather_sources and DEFAULT_ENABLED_WEATHER_SOURCES.
+WeatherSourceName = Literal[
+    "NWS",
+    "NWS:gridpoint",
+    "Open-Meteo:ECMWF",
+    "Open-Meteo:GFS",
+    "Open-Meteo:ICON",
+]
+
+ALL_WEATHER_SOURCES: tuple[WeatherSourceName, ...] = (
+    "NWS",
+    "NWS:gridpoint",
+    "Open-Meteo:ECMWF",
+    "Open-Meteo:GFS",
+    "Open-Meteo:ICON",
+)
+
+# Default working ensemble. Chosen from the 2026-08-21 source review
+# (docs/ALGO_CHANGELOG.md): NWS and NWS:gridpoint are ~the same feed
+# (error corr 0.983, identical on 80% of days), and ECMWF is the weakest
+# member — dropping it slightly improved MAE. ICON is the only source whose
+# removal significantly hurt the ensemble (p = 0.004), so it stays.
+# The other two keep being fetched and scored; they are just not blended.
+DEFAULT_ENABLED_WEATHER_SOURCES: tuple[WeatherSourceName, ...] = (
+    "NWS:gridpoint",
+    "Open-Meteo:GFS",
+    "Open-Meteo:ICON",
+)
+
+# The ensemble needs at least two independent feeds to compute a spread.
+MIN_ENABLED_WEATHER_SOURCES = 2
+
+
+def parse_enabled_weather_sources(raw: str | None) -> list[WeatherSourceName]:
+    """Parse the stored comma-separated source list into validated names.
+
+    Unknown names (e.g. a feed retired from the pipeline) are dropped. If
+    fewer than ``MIN_ENABLED_WEATHER_SOURCES`` survive, the default set is
+    returned so the ensemble always has enough inputs to compute a spread.
+
+    Args:
+        raw: Comma-separated source names from ``User.enabled_weather_sources``.
+
+    Returns:
+        A list of valid source names, in canonical order.
+    """
+    names = {s.strip() for s in (raw or "").split(",") if s.strip()}
+    enabled = [s for s in ALL_WEATHER_SOURCES if s in names]
+    if len(enabled) < MIN_ENABLED_WEATHER_SOURCES:
+        return list(DEFAULT_ENABLED_WEATHER_SOURCES)
+    return enabled
+
+
 TradeSide = Literal["yes", "no"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 TradeStatusType = Literal["OPEN", "RESTING", "WON", "LOST", "CANCELED"]
@@ -218,6 +275,15 @@ class UserSettings(BaseModel):
     active_cities: list[CityCode] = ["NYC", "CHI", "MIA", "AUS"]
     demo_mode: bool = True  # Default to demo for safety
     notifications_enabled: bool = True
+
+    # ─── Weather Sources ───
+    # Which forecast feeds are blended into the ensemble. Disabled sources are
+    # still fetched, stored, and scored in /api/accuracy/sources — they are
+    # only excluded from prediction, so re-enabling one is backed by history.
+    enabled_weather_sources: list[WeatherSourceName] = Field(
+        default_factory=lambda: list(DEFAULT_ENABLED_WEATHER_SOURCES),
+        min_length=MIN_ENABLED_WEATHER_SOURCES,
+    )
 
     # ─── Kelly Criterion Position Sizing ───
     use_kelly_sizing: bool = False  # Disabled by default (always 1 contract)

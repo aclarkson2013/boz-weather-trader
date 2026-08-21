@@ -24,6 +24,7 @@ from backend.common.schemas import (
     PendingTrade,
     TradeRecord,
     UserSettings,
+    parse_enabled_weather_sources,
 )
 from backend.kalshi.client import KalshiClient
 
@@ -95,6 +96,10 @@ def user_to_settings(user: User) -> UserSettings:
     cities_str = user.active_cities or "NYC,CHI,MIA,AUS"
     active_cities = [c.strip() for c in cities_str.split(",") if c.strip()]
 
+    # Parse enabled_weather_sources (drops unknown names, falls back to the
+    # default set if too few survive).
+    enabled_sources = parse_enabled_weather_sources(user.enabled_weather_sources)
+
     ev_thresh = user.min_ev_threshold if user.min_ev_threshold is not None else 0.05
     ev_thresh_yes = user.min_ev_threshold_yes if user.min_ev_threshold_yes is not None else 0.15
     ev_thresh_no = user.min_ev_threshold_no if user.min_ev_threshold_no is not None else 0.05
@@ -115,6 +120,7 @@ def user_to_settings(user: User) -> UserSettings:
         cooldown_per_loss_minutes=cooldown,
         consecutive_loss_limit=consec,
         active_cities=active_cities,
+        enabled_weather_sources=enabled_sources,
         demo_mode=demo,
         notifications_enabled=notifs,
         use_kelly_sizing=user.use_kelly_sizing if user.use_kelly_sizing is not None else False,
