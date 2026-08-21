@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,28 +34,61 @@ from backend.prediction.brackets import calculate_bracket_probabilities
 from backend.prediction.ensemble import assess_confidence, calculate_ensemble_forecast
 from backend.prediction.error_dist import calculate_error_std
 from backend.prediction.features import extract_features
+from backend.prediction.model_ensemble import WEIGHTS_FILENAME as ML_WEIGHTS_FILENAME
 from backend.prediction.model_ensemble import MultiModelEnsemble
-from backend.prediction.probability_calibration import apply_calibration
+from backend.prediction.probability_calibration import CALIBRATION_FILENAME, apply_calibration
+from backend.prediction.source_weights import SOURCE_WEIGHTS_FILENAME
 
 logger = get_logger("MODEL")
 
 # ─── Multi-model ensemble singleton (lazy-loaded on first use) ───
 _ml_ensemble: MultiModelEnsemble | None = None
+_ml_ensemble_mtime: float = -1.0
 
 # ─── Source weights singleton (lazy-loaded from disk) ───
 _source_weights: dict[str, float] | None = None
 _source_weights_loaded: bool = False
+_source_weights_mtime: float = -1.0
 
 # ─── Probability calibration singleton (lazy-loaded from disk) ───
 _calibration_curves: dict[str, dict] | None = None
 _calibration_loaded: bool = False
+_calibration_mtime: float = -1.0
+
+
+def _file_mtime(model_dir: str, filename: str) -> float:
+    """Return the mtime of a file in the model dir, or -1.0 if unreadable.
+
+    Used to detect that ``train_all_models`` rewrote a model artifact so the
+    in-process cache can be refreshed. ``reload_models()`` only clears globals
+    in the *calling* process, and Celery runs a prefork pool — without this
+    check, sibling worker children keep serving whatever they cached at
+    startup until the container restarts. See docs/ALGO_CHANGELOG.md
+    (2026-08-21 review, "ROOT CAUSE A").
+    """
+    try:
+        return (Path(model_dir) / filename).stat().st_mtime
+    except OSError:
+        return -1.0
 
 
 def _get_ml_ensemble() -> MultiModelEnsemble:
-    """Get or initialize the multi-model ensemble singleton."""
-    global _ml_ensemble  # noqa: PLW0603
+    """Get or initialize the multi-model ensemble singleton.
+
+    Reloads automatically when ``ml_weights.json`` changes on disk, so a
+    retrain in one Celery child is picked up by all of them.
+    """
+    global _ml_ensemble, _ml_ensemble_mtime  # noqa: PLW0603
+    settings = get_settings()
+    mtime = _file_mtime(settings.xgb_model_dir, ML_WEIGHTS_FILENAME)
+    if _ml_ensemble is not None and mtime != _ml_ensemble_mtime:
+        logger.info(
+            "ML model files changed on disk — reloading",
+            extra={"data": {"previous_mtime": _ml_ensemble_mtime, "new_mtime": mtime}},
+        )
+        _ml_ensemble = None
     if _ml_ensemble is None:
-        settings = get_settings()
+        _ml_ensemble_mtime = mtime
         _ml_ensemble = MultiModelEnsemble(model_dir=settings.xgb_model_dir)
         status = _ml_ensemble.load_all()
         available = [k for k, v in status.items() if v]
@@ -69,12 +103,19 @@ def _get_ml_ensemble() -> MultiModelEnsemble:
 
 
 def _get_source_weights() -> dict[str, float] | None:
-    """Get saved source weights from disk, or None to use defaults."""
-    global _source_weights, _source_weights_loaded  # noqa: PLW0603
+    """Get saved source weights from disk, or None to use defaults.
+
+    Reloads automatically when ``source_weights.json`` changes on disk.
+    """
+    global _source_weights, _source_weights_loaded, _source_weights_mtime  # noqa: PLW0603
+    settings = get_settings()
+    mtime = _file_mtime(settings.xgb_model_dir, SOURCE_WEIGHTS_FILENAME)
+    if _source_weights_loaded and mtime != _source_weights_mtime:
+        _source_weights_loaded = False
     if not _source_weights_loaded:
         from backend.prediction.source_weights import load_source_weights
 
-        settings = get_settings()
+        _source_weights_mtime = mtime
         _source_weights = load_source_weights(settings.xgb_model_dir)
         _source_weights_loaded = True
         if _source_weights is not None:
@@ -86,12 +127,25 @@ def _get_source_weights() -> dict[str, float] | None:
 
 
 def _get_calibration_curves() -> dict[str, dict] | None:
-    """Get saved per-city probability calibration curves from disk."""
-    global _calibration_curves, _calibration_loaded  # noqa: PLW0603
+    """Get saved per-city probability calibration curves from disk.
+
+    Reloads automatically when ``probability_calibration.json`` changes on
+    disk. This is what stops a stale "no calibration" cache from surviving a
+    refit in a sibling Celery child.
+    """
+    global _calibration_curves, _calibration_loaded, _calibration_mtime  # noqa: PLW0603
+    settings = get_settings()
+    mtime = _file_mtime(settings.xgb_model_dir, CALIBRATION_FILENAME)
+    if _calibration_loaded and mtime != _calibration_mtime:
+        logger.info(
+            "Calibration file changed on disk — reloading",
+            extra={"data": {"previous_mtime": _calibration_mtime, "new_mtime": mtime}},
+        )
+        _calibration_loaded = False
     if not _calibration_loaded:
         from backend.prediction.probability_calibration import load_calibration
 
-        settings = get_settings()
+        _calibration_mtime = mtime
         _calibration_curves = load_calibration(settings.xgb_model_dir)
         _calibration_loaded = True
         if _calibration_curves is not None:
@@ -110,14 +164,23 @@ def reload_models() -> None:
 
     Called after retraining completes (from train_models.py) so the
     prediction pipeline picks up fresh weights and calibration.
+
+    This only clears globals in the *calling* process. Sibling Celery prefork
+    children are covered by the mtime check in the ``_get_*`` loaders, which
+    is the durable mechanism; this call just makes the refresh immediate for
+    the process that did the retraining.
     """
     global _ml_ensemble, _source_weights, _source_weights_loaded  # noqa: PLW0603
     global _calibration_curves, _calibration_loaded  # noqa: PLW0603
+    global _ml_ensemble_mtime, _source_weights_mtime, _calibration_mtime  # noqa: PLW0603
     _ml_ensemble = None
     _source_weights = None
     _source_weights_loaded = False
     _calibration_curves = None
     _calibration_loaded = False
+    _ml_ensemble_mtime = -1.0
+    _source_weights_mtime = -1.0
+    _calibration_mtime = -1.0
     logger.info("ML model cache invalidated — will reload on next prediction")
 
 
