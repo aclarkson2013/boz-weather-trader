@@ -192,3 +192,56 @@ async def test_patch_split_ev_thresholds(client: AsyncClient) -> None:
     get_resp = await client.get("/api/settings")
     assert get_resp.json()["min_ev_threshold_yes"] == 0.20
     assert get_resp.json()["min_ev_threshold_no"] == 0.08
+
+
+# ─── Weather source toggles ───
+
+
+async def test_get_settings_default_weather_sources(client: AsyncClient) -> None:
+    """GET /api/settings returns the 3-source default working ensemble."""
+    response = await client.get("/api/settings")
+    assert response.status_code == 200
+    assert response.json()["enabled_weather_sources"] == [
+        "NWS:gridpoint",
+        "Open-Meteo:GFS",
+        "Open-Meteo:ICON",
+    ]
+
+
+async def test_patch_weather_sources_reenable(client: AsyncClient) -> None:
+    """A disabled source can be turned back on, and order is canonicalized."""
+    response = await client.patch(
+        "/api/settings",
+        json={
+            "enabled_weather_sources": [
+                "Open-Meteo:ICON",
+                "NWS",
+                "Open-Meteo:ECMWF",
+            ]
+        },
+    )
+    assert response.status_code == 200
+    # Canonical order, not click order.
+    assert response.json()["enabled_weather_sources"] == [
+        "NWS",
+        "Open-Meteo:ECMWF",
+        "Open-Meteo:ICON",
+    ]
+
+
+async def test_patch_weather_sources_rejects_too_few(client: AsyncClient) -> None:
+    """Fewer than 2 sources is rejected — the ensemble needs a spread."""
+    response = await client.patch(
+        "/api/settings",
+        json={"enabled_weather_sources": ["Open-Meteo:ICON"]},
+    )
+    assert response.status_code == 422
+
+
+async def test_patch_weather_sources_rejects_unknown(client: AsyncClient) -> None:
+    """An unknown source name fails schema validation."""
+    response = await client.patch(
+        "/api/settings",
+        json={"enabled_weather_sources": ["Open-Meteo:ICON", "AccuWeather"]},
+    )
+    assert response.status_code == 422

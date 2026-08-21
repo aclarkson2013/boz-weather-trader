@@ -10,10 +10,36 @@ import Skeleton from "@/components/ui/skeleton";
 import WeatherTicker from "@/components/weather-ticker/weather-ticker";
 import { disconnect, fetchUpdateStatus, triggerUpdate, updateSettings } from "@/lib/api";
 import { useAuthStatus, useSettings, useVersion } from "@/lib/hooks";
-import type { CityCode, SettingsUpdate, TradingMode, UpdateStatus } from "@/lib/types";
+import type {
+  CityCode,
+  SettingsUpdate,
+  TradingMode,
+  UpdateStatus,
+  WeatherSourceName,
+} from "@/lib/types";
 import { centsToDollars } from "@/lib/utils";
 
 const ALL_CITIES: CityCode[] = ["NYC", "CHI", "MIA", "AUS"];
+
+const ALL_WEATHER_SOURCES: WeatherSourceName[] = [
+  "NWS",
+  "NWS:gridpoint",
+  "Open-Meteo:ECMWF",
+  "Open-Meteo:GFS",
+  "Open-Meteo:ICON",
+];
+
+// Short notes shown under each toggle, from the 2026-08-21 source review.
+const WEATHER_SOURCE_NOTES: Record<WeatherSourceName, string> = {
+  "NWS": "Near-duplicate of NWS:gridpoint (98% correlated)",
+  "NWS:gridpoint": "Best NWS feed — MAE 2.41°F",
+  "Open-Meteo:ECMWF": "Weakest member — MAE 3.25°F",
+  "Open-Meteo:GFS": "Adds independent signal — MAE 2.67°F",
+  "Open-Meteo:ICON": "Only source that measurably matters (p=0.004)",
+};
+
+// The ensemble needs a spread; matches MIN_ENABLED_WEATHER_SOURCES on the API.
+const MIN_WEATHER_SOURCES = 2;
 
 type SettingsTab = "settings" | "logs";
 
@@ -38,6 +64,11 @@ export default function SettingsPage() {
   const [enablePerLossCooldown, setEnablePerLossCooldown] = useState(true);
   const [maxContractsPerBracket, setMaxContractsPerBracket] = useState(3);
   const [activeCities, setActiveCities] = useState<CityCode[]>(ALL_CITIES);
+  const [enabledSources, setEnabledSources] = useState<WeatherSourceName[]>([
+    "NWS:gridpoint",
+    "Open-Meteo:GFS",
+    "Open-Meteo:ICON",
+  ]);
   const [notifications, setNotifications] = useState(true);
 
   // Fee estimation
@@ -75,6 +106,9 @@ export default function SettingsPage() {
       setEnablePerLossCooldown(settings.enable_per_loss_cooldown);
       setMaxContractsPerBracket(settings.max_contracts_per_bracket);
       setActiveCities(settings.active_cities);
+      if (settings.enabled_weather_sources) {
+        setEnabledSources(settings.enabled_weather_sources);
+      }
       setNotifications(settings.notifications_enabled);
       setModelWeight(settings.model_weight);
       setMaxDivergence(settings.max_model_market_divergence);
@@ -90,6 +124,15 @@ export default function SettingsPage() {
         ? prev.filter((c) => c !== city)
         : [...prev, city]
     );
+  };
+
+  const toggleWeatherSource = (source: WeatherSourceName) => {
+    setEnabledSources((prev) => {
+      if (!prev.includes(source)) return [...prev, source];
+      // Never let the user drop below the ensemble minimum.
+      if (prev.length <= MIN_WEATHER_SOURCES) return prev;
+      return prev.filter((s) => s !== source);
+    });
   };
 
   const handleSave = async () => {
@@ -110,6 +153,7 @@ export default function SettingsPage() {
         enable_per_loss_cooldown: enablePerLossCooldown,
         max_contracts_per_bracket: maxContractsPerBracket,
         active_cities: activeCities,
+        enabled_weather_sources: enabledSources,
         notifications_enabled: notifications,
         model_weight: modelWeight,
         max_model_market_divergence: maxDivergence,
@@ -591,6 +635,56 @@ export default function SettingsPage() {
                     </button>
                   ))}
                 </div>
+              </section>
+
+              {/* Weather Sources */}
+              <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+                <h2 className="text-sm font-semibold mb-1">Weather Sources</h2>
+                <p className="text-xs text-boz-neutral mb-3">
+                  Which forecast feeds are blended into the prediction ensemble.
+                  Disabled sources are still fetched and scored, so you can turn
+                  them back on at any time.
+                </p>
+                <div className="space-y-2">
+                  {ALL_WEATHER_SOURCES.map((source) => {
+                    const enabled = enabledSources.includes(source);
+                    const atMinimum =
+                      enabled && enabledSources.length <= MIN_WEATHER_SOURCES;
+                    return (
+                      <button
+                        key={source}
+                        onClick={() => toggleWeatherSource(source)}
+                        disabled={atMinimum}
+                        data-testid={`weather-source-${source}`}
+                        aria-pressed={enabled}
+                        className={`w-full min-h-[44px] px-4 py-2 rounded-lg text-left transition-colors ${
+                          enabled
+                            ? "bg-boz-primary text-white"
+                            : "bg-gray-100 text-boz-neutral hover:bg-gray-200"
+                        } ${atMinimum ? "opacity-70 cursor-not-allowed" : ""}`}
+                        title={
+                          atMinimum
+                            ? `At least ${MIN_WEATHER_SOURCES} sources must stay enabled`
+                            : undefined
+                        }
+                      >
+                        <span className="block text-sm font-medium">{source}</span>
+                        <span
+                          className={`block text-xs ${
+                            enabled ? "text-white/80" : "text-boz-neutral"
+                          }`}
+                        >
+                          {WEATHER_SOURCE_NOTES[source]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-boz-neutral mt-3">
+                  {enabledSources.length} of {ALL_WEATHER_SOURCES.length} enabled
+                  {enabledSources.length <= MIN_WEATHER_SOURCES &&
+                    ` — minimum is ${MIN_WEATHER_SOURCES}`}
+                </p>
               </section>
 
               {/* Display Preferences */}

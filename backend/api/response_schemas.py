@@ -11,6 +11,7 @@ from backend.common.schemas import (
     CityCode,
     TradeRecord,
     UTCDatetime,
+    WeatherSourceName,
 )
 
 
@@ -218,6 +219,7 @@ class SettingsUpdate(BaseModel):
     cooldown_per_loss_minutes: int | None = None
     consecutive_loss_limit: int | None = None
     active_cities: list[CityCode] | None = None
+    enabled_weather_sources: list[WeatherSourceName] | None = None
     notifications_enabled: bool | None = None
     demo_mode: bool | None = None
     max_contracts_per_bracket: int | None = None

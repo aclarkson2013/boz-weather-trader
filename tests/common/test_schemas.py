@@ -5,8 +5,11 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from backend.common.schemas import (
+    ALL_WEATHER_SOURCES,
+    DEFAULT_ENABLED_WEATHER_SOURCES,
     BracketPrediction,
     BracketProbability,
     PendingTrade,
@@ -14,6 +17,7 @@ from backend.common.schemas import (
     UserSettings,
     WeatherData,
     WeatherVariables,
+    parse_enabled_weather_sources,
 )
 
 
@@ -289,3 +293,67 @@ class TestPendingTrade:
         )
         assert pt.status == "PENDING"
         assert pt.acted_at is None
+
+
+# ─── Weather source selection ───
+
+
+class TestParseEnabledWeatherSources:
+    """parse_enabled_weather_sources normalizes the stored settings string."""
+
+    def test_parses_and_canonicalizes_order(self) -> None:
+        result = parse_enabled_weather_sources("Open-Meteo:ICON,NWS,Open-Meteo:GFS")
+        assert result == ["NWS", "Open-Meteo:GFS", "Open-Meteo:ICON"]
+
+    def test_strips_whitespace(self) -> None:
+        result = parse_enabled_weather_sources(" NWS , Open-Meteo:ICON ")
+        assert result == ["NWS", "Open-Meteo:ICON"]
+
+    def test_drops_unknown_sources(self) -> None:
+        result = parse_enabled_weather_sources("NWS,AccuWeather,Open-Meteo:ICON")
+        assert result == ["NWS", "Open-Meteo:ICON"]
+
+    def test_falls_back_when_none(self) -> None:
+        assert parse_enabled_weather_sources(None) == list(DEFAULT_ENABLED_WEATHER_SOURCES)
+
+    def test_falls_back_when_empty(self) -> None:
+        assert parse_enabled_weather_sources("") == list(DEFAULT_ENABLED_WEATHER_SOURCES)
+
+    def test_falls_back_when_below_minimum(self) -> None:
+        """One valid source is not enough for a spread — use the defaults."""
+        assert parse_enabled_weather_sources("Open-Meteo:ICON") == list(
+            DEFAULT_ENABLED_WEATHER_SOURCES
+        )
+
+    def test_falls_back_when_all_unknown(self) -> None:
+        assert parse_enabled_weather_sources("Foo,Bar") == list(DEFAULT_ENABLED_WEATHER_SOURCES)
+
+    def test_default_is_the_three_source_working_set(self) -> None:
+        """Pins the choice made in the 2026-08-21 source review."""
+        assert DEFAULT_ENABLED_WEATHER_SOURCES == (
+            "NWS:gridpoint",
+            "Open-Meteo:GFS",
+            "Open-Meteo:ICON",
+        )
+
+    def test_defaults_are_a_subset_of_all_sources(self) -> None:
+        assert set(DEFAULT_ENABLED_WEATHER_SOURCES) <= set(ALL_WEATHER_SOURCES)
+
+
+class TestUserSettingsWeatherSources:
+    """UserSettings validates the enabled-source list."""
+
+    def test_default_settings_use_the_working_set(self) -> None:
+        assert UserSettings().enabled_weather_sources == list(DEFAULT_ENABLED_WEATHER_SOURCES)
+
+    def test_rejects_fewer_than_minimum(self) -> None:
+        with pytest.raises(ValidationError):
+            UserSettings(enabled_weather_sources=["Open-Meteo:ICON"])
+
+    def test_rejects_unknown_source(self) -> None:
+        with pytest.raises(ValidationError):
+            UserSettings(enabled_weather_sources=["Open-Meteo:ICON", "AccuWeather"])
+
+    def test_accepts_all_five(self) -> None:
+        settings = UserSettings(enabled_weather_sources=list(ALL_WEATHER_SOURCES))
+        assert len(settings.enabled_weather_sources) == 5

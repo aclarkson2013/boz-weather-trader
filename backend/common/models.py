@@ -120,6 +120,10 @@ class User(Base):
     cooldown_per_loss_minutes = Column(Integer, default=60)
     consecutive_loss_limit = Column(Integer, default=3)
     active_cities = Column(String, default="NYC,CHI,MIA,AUS")  # Comma-separated
+    # Comma-separated weather sources blended into the ensemble (see
+    # schemas.DEFAULT_ENABLED_WEATHER_SOURCES). Disabled sources are still
+    # fetched and scored, just not used for prediction.
+    enabled_weather_sources = Column(String, default="NWS:gridpoint,Open-Meteo:GFS,Open-Meteo:ICON")
     demo_mode = Column(Boolean, default=True)  # Default to demo for safety
     notifications_enabled = Column(Boolean, default=True)
     push_subscription = Column(Text, nullable=True)  # JSON web push subscription
