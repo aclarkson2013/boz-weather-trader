@@ -12,30 +12,48 @@
 > order-execution behavior, add a row. When we run a performance review, append a dated snapshot to
 > the *Performance Reviews* section.
 
-## Current state (as of last review 2026-08-06)
+## Current state (as of last review 2026-08-21)
 
-- **Deployed version:** v1.9.10 (homelab VM at `10.0.0.175`, live/`auto` mode, not demo)
-- **Verdict:** The **per-city probability calibration + Student-t error model (v1.9.6/v1.9.7,
-  shipped 2026-05-10)** remains the change that turned the bot profitable (Era C: +6.6% ROI,
-  EV gap +0.2pp). However, the **post-Jun-20 era (D) has erased the edge** — see the 2026-08-06
-  review. The July watch item is now confirmed as a real problem, not noise.
-- **Fix shipped (2026-08-06):** v1.9.12 corrects the bracket-bounds bug behind items 1–3 below and
-  resets the calibration layer; trading narrowed to NYC only while we watch the post-fix EV gap.
-- **DEPLOYED 2026-08-06 ~21:12 UTC** (v1.9.13, first fixed prediction cycle 21:35 UTC). Era E for
-  future reviews starts at event date **2026-08-07**. Verified live: 2°F bounds stored, top label
-  corrected, probabilities match the fixed t-CDF exactly (AUS bottom catch-all 15.1%→5.2%), stale
-  calibration ignored ("using identity until refit").
-- **Active problems (2026-08-06, pre-v1.9.12):**
-  1. Last 10 days (Jul 27–Aug 5): 34.8% win rate, −$10.78, EV gap −38pp. Model is under-forecasting
-     peak summer highs (AUS 100°F+, NYC 83–84°F) and losing NO bets on brackets the market prices
-     ~50% that then hit.
-  2. The `high` confidence bucket is **anti-predictive** across all of Era D (~38% WR, −$18.85 over
-     155 trades) while `medium` is profitable (+$11.22). Under investigation.
-  3. 100% of Era D trades are NO-side — the 12% YES threshold + 15% YES floor shut off YES entirely.
+- **Deployed version:** v1.9.13 live on the VM; **v1.9.14 built but NOT yet deployed**
+- **Balance:** $80.27 (was $78.06 on 2026-08-06)
+- **Verdict:** The v1.9.12 bracket-bounds fix is **verified correct and live**, but it did **not**
+  restore the edge. Era E (Aug 7-21) is still all-NO and still losing on a small sample.
+- **Open problems (in priority order):**
+  1. ~~**Calibration was off or half-on for most of Era E**~~ — **FIXED in v1.9.14**
+     (mtime-based reload in the `pipeline._get_*` loaders). Not yet deployed.
+  2. **`_collect_pairs` treats intraday duplicate predictions as independent samples**
+     (~19.5 rows/day/city, so NYC "sample_count 9900" is really ~90 independent days).
+     `error_dist.py` and `bias_correction.py` both dedupe per day; calibration does not.
+  3. **The AUS calibration curve emits a hard `0.0` probability** on 477/480 recent predictions.
+     Latent while AUS is disabled; a landmine if it is re-enabled (a 0-probability bracket makes a
+     NO bet look risk-free).
+  4. **Per-bracket cap leaks** - `_get_open_bracket_qty` ignores `RESTING`.
+- **NOT a problem (retracted):** `error_std` is *not* too tight - see the 2026-08-21 review.
+- **Trading scope:** NYC only, `min_ev_threshold_no` 6%, `min_ev_threshold_yes` 12%.
 
 ---
 
 ## Change history (algo-affecting)
+
+### v1.9.14 — Fix cross-process model-cache staleness (2026-08-21)
+- **Files:** `backend/prediction/pipeline.py`
+- **What:** the cached loaders in `pipeline.py` (`_get_calibration_curves`,
+  `_get_source_weights`, `_get_ml_ensemble`) now compare the **mtime** of their backing file on
+  every call and reload when it changes. `reload_models()` still runs after a retrain, but it is
+  no longer the only refresh path.
+- **Why:** Celery runs a prefork pool (`--concurrency=2`). `reload_models()` clears module-level
+  globals **only in the child that ran the training task**, so a sibling child kept serving the
+  cache it built at startup until the container restarted. After v1.9.12 invalidated the
+  calibration file on 2026-08-06, that meant **0% of predictions were calibrated on Aug 8 and only
+  ~47% from Aug 10–15** — the bot ran most of Era E without the layer that made Era C profitable.
+  Recovery on Aug 16–17 was accidental (a refit happened to land in the stale child). See the
+  2026-08-21 review, "ROOT CAUSE A".
+- **Expected effect:** calibration coverage stays at ~100% instead of drifting to ~50% after any
+  restart-free deploy that invalidates a model artifact. **No change to the probabilities
+  themselves when caches are already fresh** — this restores intended behavior rather than
+  altering it, so a clean read of its effect is just "calibrated share per day returns to ~100%".
+- **Verify after deploy:** run the isotonic-plateau query from the 2026-08-21 review; the
+  calibrated share should be ~100%/day, not ~47%.
 
 ### v1.9.12 — Fix bracket-bounds parsing + calibration reset (2026-08-06)
 - **Files:** `backend/kalshi/markets.py`, `backend/prediction/probability_calibration.py`
@@ -98,6 +116,133 @@
 ---
 
 ## Performance Reviews
+
+### 2026-08-21 — Era E two-week check (fix verified, edge NOT restored)
+
+Two-week check-in on v1.9.12/v1.9.13 (deployed 2026-08-06, Era E starts event date 2026-08-07).
+Analysis of **3,000 settled trades** pulled from `GET /api/trades?status=SETTLED`, plus live
+`/api/logs`, `/api/accuracy/calibration`, and `/api/training/reports`.
+
+**1. The bracket-bounds fix works — verified numerically.** Recomputed a live NYC log line
+(mean 76.6, std 2.08, df 10, brackets 76-or-below … 85-or-above) under both hypotheses:
+
+| Hypothesis | Probabilities | Max abs error vs logged |
+|---|---|--:|
+| **Fixed (2°F-wide, half-degree)** | 0.4813, 0.3275, 0.1461, 0.0363, 0.0071, 0.0017 | **0.0023** |
+| Buggy (1°F-wide raw strikes) | 0.5996, 0.2580, 0.1095, 0.0260, 0.0050, 0.0018 | 0.1160 |
+
+The fixed hypothesis matches; the buggy one is decisively rejected. Trade volume also fell as
+predicted: **8.5/day (Era D last 30d) → 3.8/day (Era E)**, trading on only 5 of 14 days.
+
+**2. But performance did not recover.** Era E is a small sample — treat P&L as weak evidence:
+
+| Era | Trades | Win rate | P&L | ROI | EV gap |
+|---|--:|--:|--:|--:|--:|
+| C May 10 – Jun 19 (calibration) | 655 | 60.2% | +$23.86 | +6.6% | +0.2pp |
+| D Jun 20 – Aug 6 (bounds bug) | 492 | 48.2% | −$10.95 | −4.6% | −11.0pp |
+| **E Aug 7 – Aug 21 (post-fix)** | **19** | **21.1%** | **−$4.88** | **−57.1%** | **−63.5pp** |
+
+Model-vs-market Brier edge got *worse*, not better: Era D NYC −0.0586 → **Era E NYC −0.2103**.
+All 19 Era E trades are still **NO-side**. The structural findings below are much stronger evidence
+than these 19 trades.
+
+**3. ROOT CAUSE A - calibration was off, then half-on, for most of Era E (Celery prefork).**
+*(This supersedes an earlier draft of this review that claimed calibration was entirely off. It is
+not - see the correction note below.)* Counting isotonic plateaus (two brackets sharing an exactly
+equal probability, which a raw t-CDF essentially never produces) in the stored `predictions` rows:
+
+| Day | Predictions | Calibrated |
+|---|--:|--:|
+| Aug 1-6 (pre-fix) | 384/day | 268-354 (70-92%) |
+| Aug 7 | 384 | 125 |
+| **Aug 8** | 384 | **0** |
+| Aug 9 | 384 | 91 |
+| **Aug 10-15** | 384/day | **~180 (~47%)** |
+| Aug 16 | 384 | 257 |
+| Aug 17-22 | 384/day | 348-367 (~91%) |
+
+The ~47% plateau is the signature: the worker runs `--concurrency=2` and has been **Up 2 weeks**.
+`train_all_models` calls `pipeline.reload_models()`, which resets *module-level globals in the
+calling process only*. v1.9.12 rejected the stale file on Aug 6, so both children cached
+"no calibration"; each subsequent refit (Aug 9, Aug 16) healed whichever child happened to run it.
+Recovery was accidental, not designed - and a restart-free deploy will reproduce it.
+
+**Observability trap that caused the initial misdiagnosis:** the INFO log
+`"Bracket probabilities calculated"` reports **pre-calibration** probabilities. The calibrated
+values appear only in the DEBUG line `"Probability calibration applied"` and in `brackets_json`.
+Verified on the 2026-08-21 15:05 NYC cycle - logged `[0.4836, 0.3262, ...]` vs stored
+`[0.5131, 0.2915, ...]`. Anyone debugging calibration from INFO logs will conclude it is off.
+
+**4. RETRACTED - `error_std` is NOT too tight.** An earlier draft of this review claimed the CDF
+was too narrow, comparing live `error_std` against ML test RMSE of 2.9-4.3 F. **That comparison was
+invalid**: those RMSEs pool all four seasons and all forecast horizons, while `error_std` is
+season- and day-of-specific. Measuring the actual day-of weighted source-ensemble error for
+**summer only** (n~81/city, the same slice `error_dist` uses) gives the opposite result:
+
+| City | Measured summer day-of sigma | Live `error_std` | |
+|---|--:|--:|---|
+| NYC | 1.55 | 2.08 | live is 1.34x **wider** |
+| CHI | 1.07 | 1.70 | 1.59x wider |
+| MIA | 1.01 | 1.19 | 1.18x wider |
+| AUS | 1.01 | 1.47 | 1.46x wider |
+
+`error_dist.calculate_error_std` is behaving correctly and conservatively. Its per-day averaging
+(`func.avg` + `group_by date`) - flagged as a bug in the earlier draft - is the **correct** pattern,
+matching `bias_correction.calculate_rolling_bias`.
+
+**4b. The real calibration defect: sample independence.** `_collect_pairs` does *not* dedupe by day,
+unlike `error_dist` and `bias_correction`. It feeds every intraday prediction to the isotonic fit as
+an independent observation. For the Aug 16 refit, NYC reported `sample_count = 9900` - but that is
+**1,757 prediction rows over only 90 distinct days** (~19.5 near-identical rows per day). So
+`MIN_SAMPLES_PER_CITY = 200` is satisfied by roughly ten days of data, and the isotonic curve is far
+less constrained than its sample count suggests. Consequences visible in production:
+
+- **AUS emits a hard `0.0`** on **477 of 480** predictions since Aug 17 (curve `y_range` starts at
+  0.0). A zero-probability bracket makes a NO bet look risk-free to the EV calculator. AUS is
+  currently disabled, so this is latent - but it is the same cell that produced Era D's worst losses.
+- CHI/MIA curves were fitted with `y_range` capping at 0.50 / 0.556.
+- NYC is the healthiest (no zeros, max prob 0.9546) - fortunate, as it is the only city trading.
+
+**5. Weather sources - five is more than the accuracy justifies.**
+Day-of forecast vs settled actual, latest fetch per city/day, 446 city-days with all five present:
+
+| Source | MAE | RMSE | Bias | Live weight |
+|---|--:|--:|--:|--:|
+| NWS | 2.49 | 4.29 | -0.02 | 0.229 |
+| NWS:gridpoint | 2.41 | 4.27 | -0.09 | 0.226 |
+| Open-Meteo:ECMWF | 3.25 | 4.57 | -0.97 | 0.175 |
+| Open-Meteo:GFS | 2.67 | 4.28 | -0.29 | 0.176 |
+| Open-Meteo:ICON | 2.75 | 4.21 | -0.81 | 0.193 |
+
+- **NWS and NWS:gridpoint are effectively one source**: error correlation **0.983**, level
+  correlation **0.9967**, identical on **80%** of days, mean absolute difference **0.32 F**. They
+  jointly hold **45.5%** of ensemble weight, so the ensemble is really "NWS twice + three others".
+- All five error series correlate **0.86-0.98**, so diversification gains are inherently small.
+- **Leave-one-out (paired t-test on squared error):** only **ICON** matters - dropping it costs
+  +0.047 F RMSE, *p* = 0.004. Dropping NWS (+0.001, *p* = 0.97), gridpoint (+0.013, *p* = 0.62)
+  or GFS (+0.012, *p* = 0.38) is not significant, and dropping **ECMWF improves** MAE by 0.100
+  (*p* = 0.55).
+- **Best 3-source subset (gridpoint + GFS + ICON) beats all five**: RMSE 4.098 vs 4.135.
+
+**Conclusion:** the 4th and 5th sources buy no measurable accuracy. The defensible reason to keep
+them is **failure tolerance**, which is not hypothetical - Aug 18-21 logged 104 x Open-Meteo 503 and
+86 x "Missing temp_max". Recommended: keep ICON (the only significant contributor) + one NWS feed +
+GFS as the working ensemble, retain the rest as hot spares, and stop giving two copies of NWS 45% of
+the weight.
+
+**6. Per-bracket position cap leaks.** `_get_open_bracket_qty` counts only
+`Trade.status == TradeStatus.OPEN`, ignoring `RESTING`. On Aug 10 the bot accumulated **10 contracts
+on one bracket** ("88F or below") against `max_contracts_per_bracket = 5` - 5 fills at 02:45-03:45
+and 5 more at 15:45-17:00. All 10 lost (-$4.69, the bulk of Era E's loss).
+
+**7. Data-quality degradation (Aug 18-21).** 104 x "Open-Meteo returned 503, retrying" and 86 x
+"Missing temp_max in Open-Meteo response", plus 10 Kalshi WebSocket reconnects. Intermittent, not
+down - all 5 sources were present in the Aug 21 cycles.
+
+> Next review: re-check (a) the calibrated-prediction share per day (the plateau query above - it
+> should be ~100%, not ~47%), (b) whether AUS still emits `0.0` probabilities, (c) whether any
+> YES-side trades appear. The EV gap remains the key health metric. Note: read calibrated values
+> from `brackets_json`, **not** from the `"Bracket probabilities calculated"` INFO log.
 
 ### 2026-08-06 — last-month deep dive (Period D watch item CONFIRMED)
 
