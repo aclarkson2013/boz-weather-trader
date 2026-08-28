@@ -12,23 +12,34 @@
 > order-execution behavior, add a row. When we run a performance review, append a dated snapshot to
 > the *Performance Reviews* section.
 
-## Current state (as of last review 2026-08-21)
+## Current state (as of last review 2026-08-28)
 
-- **Deployed version:** **v1.9.15 live on the VM** (v1.9.14 = the calibration cache fix, deployed
-  2026-08-21; v1.9.15 = updater fixes only, no algo change). **v1.9.16 built but NOT yet deployed.**
-- **Balance:** $80.27 (was $78.06 on 2026-08-06)
-- **Verdict:** The v1.9.12 bracket-bounds fix is **verified correct and live**, but it did **not**
-  restore the edge. Era E (Aug 7-21) is still all-NO and still losing on a small sample.
+- **Deployed version:** **v1.9.16 live on the VM** (calibration cache fix + 3-source ensemble
+  both active).
+- **Balance:** $71.76 (was $80.27 on 2026-08-21, $78.06 on 2026-08-06)
+- **Verdict:** **No green day since Aug 14.** Era F (post-v1.9.16, Aug 22→) is 1-for-17, −$7.87.
+  The infrastructure fixes all verified, but the model has **no edge over the market** — the
+  market's Brier beats the model's in **all four cities even over 90 days**, and every trade the
+  bot places is a max-divergence NO clamp (uniform EV 0.064–0.065 is the arithmetic signature).
+  The bot's trade filter selects precisely the model's worst errors (adverse selection). See the
+  2026-08-28 review.
 - **Open problems (in priority order):**
-  1. ~~**Calibration was off or half-on for most of Era E**~~ — **FIXED in v1.9.14**
-     (mtime-based reload in the `pipeline._get_*` loaders). Not yet deployed.
-  2. **`_collect_pairs` treats intraday duplicate predictions as independent samples**
-     (~19.5 rows/day/city, so NYC "sample_count 9900" is really ~90 independent days).
-     `error_dist.py` and `bias_correction.py` both dedupe per day; calibration does not.
-  3. **The AUS calibration curve emits a hard `0.0` probability** on 477/480 recent predictions.
-     Latent while AUS is disabled; a landmine if it is re-enabled (a 0-probability bracket makes a
-     NO bet look risk-free).
-  4. **Per-bracket cap leaks** - `_get_open_bracket_qty` ignores `RESTING`.
+  1. **Negative model edge, structurally selected**: the bot only ever trades brackets where the
+     model disagrees with the market by ≥25pp, and on that subset the market is consistently
+     right (7d traded-subset Brier: model 0.587 vs market 0.259). No threshold tweak fixes this;
+     it needs either a model-accuracy fix or a pause.
+  2. **Regime lag**: late-Aug NYC cool-down; the enabled sources over-forecast highs 1–5°F nearly
+     every day Aug 21–27. Rolling bias (14d mean) reads +0.29°F — a mean over mixed regimes
+     cannot correct a fast regime shift, so the correction did nothing while trades clustered on
+     the warm-miss days.
+  3. **ECMWF (dropped in v1.9.16) was the best NYC source Aug 22–27** (+0.5..+1.2°F vs
+     −1.5..−5.9°F for the enabled three); GFS (kept) was the worst. Re-enabling ECMWF is a
+     one-toggle, reversible change backed by continuous accuracy history.
+  4. **`_collect_pairs` treats intraday duplicate predictions as independent samples** (unchanged).
+  5. **The AUS calibration curve emits a hard `0.0` probability** (latent while AUS disabled).
+  6. **Per-bracket cap leaks** - `_get_open_bracket_qty` ignores `RESTING`. (Cap 5 held in Era F,
+     but 5 stacked contracts per wrong opinion is still the loss multiplier: 15 of 17 Era F
+     trades were 3 brackets × 5 contracts.)
 - **NOT a problem (retracted):** `error_std` is *not* too tight - see the 2026-08-21 review.
 - **Trading scope:** NYC only, `min_ev_threshold_no` 6%, `min_ev_threshold_yes` 12%.
 
@@ -141,6 +152,100 @@
 ---
 
 ## Performance Reviews
+
+### 2026-08-28 — "why no green day?" (Era F: the losing mechanism, fully traced)
+
+Prompted by the user noticing no green day in a while. Live data from the VM: 1,000 most recent
+settled trades, `/api/accuracy/edge`, `/api/accuracy/trends` per source, `/api/accuracy/calibration`,
+and the PREDICTION log stream. v1.9.16 is deployed (all Aug 21 fixes live).
+
+**1. Last green day: Aug 14.** Daily P&L since: Aug 16 −$0.50, Aug 18 −$2.09, (no trades
+Aug 19–22), Aug 23 −$2.70, Aug 24 −$2.18, Aug 25 −$0.51, Aug 26 −$1.98, Aug 27 −$0.50.
+Trailing 7 days: **1 win / 16 losses, −$7.69**. August month-to-date: −$20.64. Balance $71.76.
+
+| Era | Trades | Win rate | P&L | ROI | avg promised EV |
+|---|--:|--:|--:|--:|--:|
+| E Aug 7 – Aug 21 (post-bounds-fix) | 19 | 21.1% | −$5.22 | −49.9% | +6.4% |
+| **F Aug 22 → (v1.9.16 live)** | **17** | **5.9%** | **−$7.87** | **−92.7%** | **+6.4%** |
+
+All 36 trades NO-side, all NYC. Era F is 3 brackets × 5 stacked contracts + 2 singles.
+
+**2. The losing trade, mechanically.** Every losing trade has the same shape: NYC bottom/low
+bracket ("79°F or below" etc.) priced ~50¢ by the market, model probability 0.13–0.28, bot sells
+it (NO) — and the bracket **hits**. Note the promised-EV column: **every trade lands at exactly
+0.064–0.065**. That is not a coincidence, it is arithmetic. With guardrails
+`max_model_market_divergence = 0.25` and `model_weight = 0.4`
+(`ev_calculator.apply_guardrails`), any model prob ≥25pp below market clamps to
+`market − 0.25`, blends to `market − 0.10`, and at a 50¢ price that yields ~+6.5% EV after fees —
+the maximum the pipeline can emit. **A uniform 0.064–0.065 EV column means literally every trade
+the bot places is a max-divergence clamp**: the bot now *only* trades when the model maximally
+disagrees with the market.
+
+**3. And on that subset, the market is right — the model has negative edge everywhere.**
+`/api/accuracy/edge` (Brier, lower is better):
+
+| Window | Model Brier | Market Brier | Edge | Verdict |
+|---|--:|--:|--:|---|
+| 7 days (n=17, the Era F trades) | 0.587 | 0.259 | **−0.328** | Market outperforming |
+| 90 days NYC (n=222) | 0.310 | 0.267 | −0.043 | Market outperforming |
+| 90 days MIA / AUS / CHI | 0.309/0.331/0.322 | 0.264/0.266/0.273 | −0.045/−0.064/−0.049 | Market outperforming |
+
+The 30-day NYC calibration table sharpens this into **adverse selection**: across *all* brackets
+the model's 0.1–0.2 bin is nearly calibrated (predicted 0.136, actual 0.143, n=2756) — but the
+mid-bins where model and market disagree are badly off (predicted 0.46 → actual 0.22; predicted
+0.55 → actual 0.28). The trade filter (EV threshold + divergence) samples exactly the
+disagreement region, i.e. the model's worst errors. Aggregate calibration looks fine while every
+*traded* probability is wrong.
+
+**4. The proximate weather cause: a late-August cool regime the sources keep missing warm.**
+Per-source day-of error for NYC (`actual − forecast`, °F; negative = forecast too warm):
+
+| Source | 08-21 | 08-22 | 08-23 | 08-24 | 08-25 | 08-26 | 08-27 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| NWS:gridpoint (enabled) | −2.0 | −1.6 | −1.7 | −1.8 | −2.6 | −1.3 | −4.9 |
+| Open-Meteo:GFS (enabled) | −2.1 | +1.4 | −3.5 | −2.8 | −2.9 | −4.1 | −5.9 |
+| Open-Meteo:ICON (enabled) | −1.9 | −1.2 | −1.6 | −0.8 | −0.9 | −0.0 | −3.1 |
+| **Open-Meteo:ECMWF (dropped in v1.9.16)** | −1.5 | **+2.2** | **+0.5** | **+0.7** | **+1.2** | **+1.1** | **−1.8** |
+
+Every enabled source ran warm nearly every day; the ensemble kept predicting ~81–82°F highs while
+actuals came in ≤79, so the model kept assigning ~13–27% to the cool bracket the market (rightly)
+priced at ~50%. Two aggravators:
+
+- **Rolling bias correction did nothing**: `calculate_rolling_bias` returned **+0.29°F**
+  (14-day mean) on Aug 28 — the warm misses of Aug 23–27 are averaged against the cool-biased
+  days of Aug 18/20, so a windowed mean structurally cannot catch a fast regime flip. Trades
+  cluster on exactly the days the mean misses.
+- **v1.9.16 dropped the one source that had the regime right.** ECMWF was removed from the
+  default ensemble (justified on 446-day pooled stats) but was the *best* NYC source in the week
+  after the switch, while GFS — the worst performer this week at −2.8..−5.9 — stayed. Small
+  sample, and Era E was already losing with all 5 sources, so this is an aggravator, not the root
+  cause.
+
+**5. What this rules out.** The Aug 21 infrastructure worries are clear: calibration is loading
+(v1.9.14 mtime reload live; identical model probs across cycles show a stable, applied pipeline),
+bounds are correct (verified Aug 21), the bracket cap held at 5 in Era F. The remaining problem is
+not plumbing — **the strategy "fade the market when the model disagrees by ≥25pp" has had negative
+expectancy in every era since June**, and after v1.9.12 cut volume, those max-divergence fades are
+the *only* trades left.
+
+**Options discussed:** (a) pause live trading until the model demonstrates positive edge
+out-of-sample; (b) re-enable ECMWF (one Settings toggle, reversible); (c) tighten
+`max_model_market_divergence` (e.g. 0.25 → 0.15) and/or cut `model_weight` so max-divergence
+fades can no longer clear the 6% NO threshold — note this likely reduces trade count to ~zero,
+which is (a) by another name; (d) make the EV threshold scale with recent realized model-vs-market
+edge so the bot self-throttles when the market is beating it.
+
+**Decision (2026-08-28): APPLIED & VERIFIED.** (a) + (b) — trading mode → `manual` and
+`Open-Meteo:ECMWF` re-enabled (4-source ensemble), both flipped by the user via the Settings UI
+and confirmed live via `GET /api/settings`. Edge gate (d) deferred — revisit at the next review. Rationale for skipping (c): with `model_weight` 0.3 the clamp arithmetic means
+tightening divergence to 0.15 caps attainable EV at ~2.5%, below the 6% NO threshold — zero trades
+ever fire, i.e. it is a disguised pause. Note the open position at decision time: 1 contract NO on
+`KXHIGHNY-26AUG29-T79` @ 40¢ market — the model's own current Aug 29 forecast (78.4°F mean) gives
+that bracket ~even odds, so the position contradicts the bot's latest view; left to the user.
+
+> Next review: EV gap remains the key health metric, plus (a) the model-vs-market Brier edge at
+> 7/30 days — the bot should not be trading while it is negative; (b) whether ECMWF's recent NYC
+> advantage persisted; (c) AUS 0.0-probability curve before any city re-enable.
 
 ### 2026-08-21 — Era E two-week check (fix verified, edge NOT restored)
 
