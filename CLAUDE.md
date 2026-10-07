@@ -6,6 +6,8 @@ Boz Weather Trader is a free, open-source automated trading bot for Kalshi weath
 
 **PRD:** See `PRD.md` for the full product requirements document (v0.5+).
 
+**Algo v2 (in progress):** See `docs/ALGO_V2_PRD.md` (requirements, slices, gates) and `docs/research/v2-preregistration.md` (frozen strategy list + pass/fail gate). Research: `docs/research/2026-10-07-algo-v2-research.md`.
+
 **Algo history & performance:** See `docs/ALGO_CHANGELOG.md` for the running history of every change to *how the bot predicts and decides trades* (prediction pipeline, probability model, EV/risk logic, order execution), each paired with its measured live-performance effect, plus dated performance reviews. **Read it before modifying prediction or trading logic, and before any performance review. Update it whenever a change alters prediction/probability/EV/sizing/risk/execution behavior, and append a snapshot whenever a performance review is run.**
 
 ## Architecture Overview
@@ -117,7 +119,8 @@ tests/                   → 1573 backend + 268 frontend = 1841 tests
 - 4 cities: NYC (Central Park), Chicago (Midway), Miami (MIA), Austin (AUS)
 - 6 brackets per city per day (middle 4 are 2°F wide, top/bottom are catch-alls)
 - Markets launch 10:00 AM ET the day before the event
-- Settlement authority: Kalshi API (`/portfolio/settlements`) — win/loss from `market_result`; NWS CLI temps used for display only
+- Settlement authority: Kalshi API (`/portfolio/settlements`) — win/loss from `market_result`
+- Settlement data source: NWS Daily Climate Report (CLI) for events up to 2026-08-13; **The Weather Company** (weather.com/kalshi, same CLI station e.g. CLINYC) for events from 2026-08-14 — only the first non-preliminary report counts. For backtests/labels use Kalshi `result` / `expiration_value`; NWS CLI temps are for display only
 - Measurement period: 12:00 AM - 11:59 PM LOCAL STANDARD TIME (not DST)
 - Contract pays $1 if temp lands in bracket, $0 otherwise
 

@@ -12,11 +12,32 @@
 > order-execution behavior, add a row. When we run a performance review, append a dated snapshot to
 > the *Performance Reviews* section.
 
-## Current state (as of last review 2026-08-28)
+## Current state (as of last review 2026-10-07)
 
-- **Deployed version:** **v1.9.16 live on the VM** (calibration cache fix + 3-source ensemble
-  both active).
-- **Balance:** $71.76 (was $80.27 on 2026-08-21, $78.06 on 2026-08-06)
+- **Deployed version:** v1.9.16, **`trading_mode: manual` since 2026-08-28** (no live trades
+  since), 4-source ensemble (NWS:gridpoint, ECMWF, GFS, ICON), NYC only.
+- **Balance:** $66.76 (was $71.76 on 2026-08-28; $2.90 of the drop is the last 6 settled trades,
+  ~$2.10 is unreconciled against the DB — check Kalshi portfolio history).
+- **Verdict (2026-10-07):** the pause was the right call. The 237 queued-but-unexecuted signals
+  (a free paper record) would have lost money: capped the way auto mode trades, **106 contracts,
+  42.5% WR, −$6.03, −12.3% ROI** vs +6.4% promised. Market Brier 0.209 vs model 0.337 on those
+  signals. The loss is concentrated in **bottom catch-all ("X°F or below") NO fades: 4 wins in
+  41, −79.9% ROI** — the model's NYC ensemble ran ~1°F warm all of September, so it
+  systematically under-prices the cold bracket. Middle-bracket fades were +19.9% ROI on 65
+  contracts but only ~20 independent days, and their Brier is a dead heat with the market
+  (−0.004) — not evidence of edge. See the 2026-10-07 review.
+- **New problems found 2026-10-07:** (a) the "edge gate" metric we planned to watch
+  (`/api/accuracy/edge`) is **trade-based, so it has had zero samples since the pause** and can
+  never show recovery while paused; (b) that endpoint scores NO trades' `market_probability`
+  (stored NO-side) against the YES outcome — a sign bug (small on history: market Brier 0.257 →
+  0.248 corrected, 90d); (c) **the VM was down ~4.5 days (Oct 2 00:15 → Oct 6 18:39 UTC)** with
+  no alert, because Alertmanager runs on the same VM; NYC settlements for Oct 1–4 are missing.
+
+- **Next: Algo v2** (approved 2026-10-07) — measure-first rebuild: real-price archive + backtester,
+  pre-registered strategies and gate, paper trading before any money. See `docs/ALGO_V2_PRD.md`.
+
+### Previous verdict (2026-08-28)
+
 - **Verdict:** **No green day since Aug 14.** Era F (post-v1.9.16, Aug 22→) is 1-for-17, −$7.87.
   The infrastructure fixes all verified, but the model has **no edge over the market** — the
   market's Brier beats the model's in **all four cities even over 90 days**, and every trade the
@@ -152,6 +173,71 @@
 ---
 
 ## Performance Reviews
+
+### 2026-10-07 — six weeks paused (paper record, source check, gate-metric flaw)
+
+First review run under the "Delivery Pipeline" process (this is stage 10, *Observe*). Bot in
+`manual` since 2026-08-28, so the evidence is the **paper record**: every signal the scanner
+queued in `pending_trades` (all expired unexecuted), scored against NWS CLI settlements. Data
+pulled read-only from the VM Postgres. Nothing on the live bot was changed.
+
+**1. Paper record, Aug 29 → Sep 30 (237 signals, 219 scorable, all NYC, all NO-side).**
+Convention note for future reviews: in `pending_trades` (and `TradeSignal`), `price_cents` is
+the **YES** price and `market_probability` is the **chosen side's** price — for a NO signal the
+stake is `100 − price_cents` and the market's YES probability is `price_cents/100`.
+
+| Slice | Contracts | Win rate | P&L | ROI | Model Brier | Market Brier |
+|---|--:|--:|--:|--:|--:|--:|
+| Every signal, 1 contract each | 219 | 37.0% | −$19.41 | −20.2% | 0.379 | 0.186 |
+| First signal per bracket | 29 | 44.8% | −$1.61 | −11.5% | 0.322 | 0.222 |
+| **Capped 5/bracket (≈ what auto would have done)** | **106** | **42.5%** | **−$6.03** | **−12.3%** | 0.337 | 0.209 |
+| — bottom catch-all "X°F or below" | 41 | **9.8%** | −$12.62 | **−79.9%** | 0.491 | 0.165 |
+| — middle 2°F brackets | 65 | 63.1% | +$6.59 | +19.9% | 0.240 | 0.236 |
+
+Promised EV on every signal was again 0.060–0.065 (184 of 219 exactly 0.065): still 100%
+max-divergence clamps. The cold catch-all lost on 8 of 9 distinct days. The middle-bracket
+profit is ~20 independent days with Brier parity — luck-compatible, not an edge.
+
+**2. Why the cold bracket keeps hitting: the NYC ensemble runs warm.** Day-ahead (last issue
+before the target day), `actual − forecast`, Aug 29 → Oct 6:
+
+| NYC source | n | Bias °F | MAE | Warm-miss days |
+|---|--:|--:|--:|--:|
+| Ensemble (model) | 33 | −0.94 | **1.48** | 24/33 |
+| NWS:gridpoint | 35 | −1.23 | 1.69 | 24/35 |
+| ECMWF | 35 | −0.96 | 1.81 | 24/35 |
+| ICON | 35 | −0.72 | 1.85 | 20/35 |
+| GFS | 35 | −0.93 | 2.09 | 24/35 |
+
+The ensemble is actually the most accurate single forecast by MAE, so this is not "bad
+sources". It is a **persistent ~1°F warm bias across every source** that the rolling bias
+correction is not removing, and that bias lands exactly on the cold catch-all bracket. Since the
+market prices that bracket correctly, every clamp-fade on it is a loss.
+
+**3. ECMWF's NYC lead did not persist.** It was best in the Aug 22–28 week (bias +1.36, only 1
+warm miss) but mid-pack since (MAE 1.81, rank 3 of 4). Keeping it on costs nothing; it is not a
+fix. Side note: in MIA/AUS the ensemble sits 1.5–2°F *cooler* than the actuals while NWS alone is
+near zero bias — and in AUS Aug 22–28 the ensemble (+3.61) was outside the range of *every*
+source (max +2.39), i.e. a post-ensemble correction is pushing the wrong way. Must be understood
+before any city re-enable.
+
+**4. The planned edge gate can't work as specified.** The Aug 28 decision said "resume only if
+`/api/accuracy/edge` turns positive". That endpoint reads **settled trades only** → zero samples
+while paused, so it can never turn positive. It also has a side bug: for NO trades it compares the
+stored NO-side `market_probability` with the bracket-hit (YES) outcome. Recomputed over 90 days
+(287 trades) market Brier moves 0.257 → 0.248 corrected — the verdict ("market outperforming")
+was right, just understated. Any gate must score *signals* (or all predicted brackets vs market
+snapshots), not only executed trades, and use YES-side probabilities consistently.
+
+**5. Ops: silent 4.5-day outage.** No predictions/forecasts from Oct 2 ~00:15 to Oct 6 18:39 UTC
+(VM boot time). Prometheus/Alertmanager live on the same VM, so nothing alerted. NYC settlements
+for Oct 1–4 are missing from the `settlements` table.
+
+**6. Money.** Balance $66.76. DB accounts for −$2.90 since the Aug 28 snapshot (last 6 settled
+trades incl. the Aug 29 NO-78°F position, −$0.42); ~$2.10 is unreconciled.
+
+> Next review: only after a code change ships. Track the paper-record ROI split by bracket type,
+> the ensemble's NYC day-ahead bias, and (once fixed) the signal-based edge metric.
 
 ### 2026-08-28 — "why no green day?" (Era F: the losing mechanism, fully traced)
 
