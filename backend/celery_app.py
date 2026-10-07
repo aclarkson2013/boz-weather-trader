@@ -44,6 +44,7 @@ celery_app.conf.update(
         "backend.prediction.scheduler",
         "backend.prediction.train_xgb",
         "backend.prediction.train_models",
+        "backend.kalshi.tasks",
     ],
 )
 
@@ -86,6 +87,15 @@ celery_app.conf.beat_schedule = {
     "retrain-ml-models": {
         "task": "backend.prediction.train_models.train_all_models",
         "schedule": crontab(hour=3, minute=0, day_of_week=0),
+    },
+    # ─── Algo v2: Kalshi market archive (S1) ───
+    "kalshi-archive-backfill": {
+        "task": "backend.kalshi.tasks.archive_backfill",
+        "schedule": crontab(minute=20),  # Hourly; self-chains while work remains
+    },
+    "kalshi-record-quotes": {
+        "task": "backend.kalshi.tasks.record_quotes_task",
+        "schedule": crontab(minute="2-59/5"),  # Offset from trading-cycle minutes
     },
 }
 

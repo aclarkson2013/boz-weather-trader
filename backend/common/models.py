@@ -15,12 +15,14 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Enum,
     Float,
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
 )
@@ -367,3 +369,108 @@ class TrainingReport(Base):
     error_message = Column(Text, nullable=True)
 
     __table_args__ = (Index("ix_training_report_completed", "completed_at"),)
+
+
+# ─── Algo v2: Kalshi market archive (slice S1) ───
+
+
+class KalshiArchivedMarket(Base):
+    """One archived Kalshi weather market (bracket) with its outcome.
+
+    Populated by backend/kalshi/archive.py from Kalshi's public API (live and
+    /historical endpoints). Labels come only from Kalshi ``result`` /
+    ``expiration_value`` (settlement source differs by era — see ``era``).
+    """
+
+    __tablename__ = "kalshi_markets"
+
+    ticker = Column(String, primary_key=True)
+    event_ticker = Column(String, nullable=False)
+    series_ticker = Column(String, nullable=False)
+    city = Column(Enum(CityEnum, native_enum=False), nullable=False)
+    event_date = Column(Date, nullable=False)  # LST event date
+    label = Column(String, nullable=False)
+    strike_type = Column(String, nullable=True)  # "less" / "between" / "greater"
+    floor_strike = Column(Float, nullable=True)
+    cap_strike = Column(Float, nullable=True)
+    lower_bound_f = Column(Float, nullable=True)  # Continuous x.5 bound; None = bottom edge
+    upper_bound_f = Column(Float, nullable=True)  # Continuous x.5 bound; None = top edge
+    tiles_ok = Column(Boolean, nullable=False, default=True)
+    open_time = Column(TZNaiveDateTime, nullable=True)
+    close_time = Column(TZNaiveDateTime, nullable=True)
+    status = Column(String, nullable=True)
+    result = Column(String, nullable=True)  # "yes" / "no" / None while unsettled
+    expiration_value = Column(Float, nullable=True)  # Settled temperature (°F)
+    era = Column(String, nullable=False)  # "E0" / "E1" (NWS CLI) / "E2" (Weather Company)
+    source = Column(String, nullable=False)  # "live" / "historical"
+    n_candles = Column(Integer, nullable=True)
+    median_spread_cents = Column(Float, nullable=True)
+    candles_fetched_at = Column(TZNaiveDateTime, nullable=True)
+    archived_at = Column(TZNaiveDateTime, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("ix_kalshi_markets_city_date", "city", "event_date"),
+        Index("ix_kalshi_markets_event", "event_ticker"),
+    )
+
+
+class KalshiCandle(Base):
+    """Hourly (or other period) candle for an archived market: yes_bid/yes_ask OHLC in cents."""
+
+    __tablename__ = "kalshi_candles"
+
+    ticker = Column(String, primary_key=True)
+    period_min = Column(Integer, primary_key=True)
+    end_ts = Column(TZNaiveDateTime, primary_key=True)  # Candle period end (UTC)
+    yes_bid_open = Column(SmallInteger, nullable=True)
+    yes_bid_high = Column(SmallInteger, nullable=True)
+    yes_bid_low = Column(SmallInteger, nullable=True)
+    yes_bid_close = Column(SmallInteger, nullable=True)
+    yes_ask_open = Column(SmallInteger, nullable=True)
+    yes_ask_high = Column(SmallInteger, nullable=True)
+    yes_ask_low = Column(SmallInteger, nullable=True)
+    yes_ask_close = Column(SmallInteger, nullable=True)
+    price_close = Column(SmallInteger, nullable=True)  # Last trade price; None if no trades
+    volume = Column(Float, nullable=True)
+    open_interest = Column(Float, nullable=True)
+    subcent = Column(Boolean, nullable=False, default=False)  # Any price not a whole cent
+
+
+class KalshiQuote(Base):
+    """Live top-of-book snapshot for one market (recorded every 5 minutes)."""
+
+    __tablename__ = "kalshi_quotes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String, nullable=False)
+    event_ticker = Column(String, nullable=False)
+    city = Column(Enum(CityEnum, native_enum=False), nullable=False)
+    event_date = Column(Date, nullable=False)
+    ts = Column(TZNaiveDateTime, nullable=False)
+    yes_bid = Column(SmallInteger, nullable=True)
+    yes_ask = Column(SmallInteger, nullable=True)
+    yes_bid_size = Column(Float, nullable=True)
+    yes_ask_size = Column(Float, nullable=True)
+    last_price = Column(SmallInteger, nullable=True)
+    volume = Column(Float, nullable=True)
+    status = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_kalshi_quotes_ticker_ts", "ticker", "ts"),
+        Index("ix_kalshi_quotes_city_date", "city", "event_date"),
+    )
+
+
+class KalshiArchiveDay(Base):
+    """Backfill progress per city-day (complete / unsettled / empty / error)."""
+
+    __tablename__ = "kalshi_archive_days"
+
+    city = Column(Enum(CityEnum, native_enum=False), primary_key=True)
+    event_date = Column(Date, primary_key=True)
+    event_ticker = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    n_markets = Column(Integer, default=0)
+    attempts = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    updated_at = Column(TZNaiveDateTime, default=_utcnow)

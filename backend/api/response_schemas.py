@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
@@ -365,3 +366,35 @@ class ModelEdgeReport(BaseModel):
     sample_count: int
     by_side: dict[str, ModelEdgeBucket]  # "yes" and "no"
     by_city: dict[str, ModelEdgeBucket]  # "NYC", "CHI", etc.
+
+
+# ─── Algo v2: Kalshi Market Archive Coverage ───
+
+
+class ArchiveCoverageRow(BaseModel):
+    """Archive coverage for one city and calendar month."""
+
+    city: str
+    month: str  # "YYYY-MM"
+    days_expected: int
+    days_complete: int
+    days_unsettled: int
+    days_empty: int
+    days_error: int
+    markets: int
+    markets_with_candles: int
+    markets_labeled: int
+    markets_not_tiling: int
+    median_spread_cents: float | None
+
+
+class ArchiveCoverageResponse(BaseModel):
+    """Kalshi market archive coverage summary (GET /api/archive/coverage)."""
+
+    archive_start: date
+    archive_end: date
+    days_complete: int
+    days_expected: int
+    markets: int
+    markets_with_candles: int
+    rows: list[ArchiveCoverageRow]
