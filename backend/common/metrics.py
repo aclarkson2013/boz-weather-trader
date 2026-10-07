@@ -274,3 +274,11 @@ KALSHI_QUOTES_RECORDED_TOTAL = Counter(
     "Top-of-book quote snapshots recorded",
     labelnames=["city"],
 )
+
+
+# ─── Housekeeping ───
+
+LOG_ENTRIES_PURGED_TOTAL = Counter(
+    "log_entries_purged_total",
+    "Log entries deleted by the nightly log-retention task",
+)

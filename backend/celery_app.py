@@ -45,6 +45,7 @@ celery_app.conf.update(
         "backend.prediction.train_xgb",
         "backend.prediction.train_models",
         "backend.kalshi.tasks",
+        "backend.common.maintenance",
     ],
 )
 
@@ -96,6 +97,11 @@ celery_app.conf.beat_schedule = {
     "kalshi-record-quotes": {
         "task": "backend.kalshi.tasks.record_quotes_task",
         "schedule": crontab(minute="2-59/5"),  # Offset from trading-cycle minutes
+    },
+    # ─── Housekeeping ───
+    "purge-old-logs": {
+        "task": "backend.common.maintenance.purge_old_logs",
+        "schedule": crontab(hour=4, minute=30),  # Daily 4:30 AM ET (quiet hours)
     },
 }
 
