@@ -253,3 +253,24 @@ ML_SOURCE_WEIGHTS_UPDATED_TOTAL = Counter(
 def set_app_info(version: str, environment: str) -> None:
     """Set the app_info metric values. Called once at startup."""
     APP_INFO.info({"version": version, "environment": environment})
+
+
+# ─── Algo v2: Kalshi Market Archive ───
+
+KALSHI_PUBLIC_REQUESTS_TOTAL = Counter(
+    "kalshi_public_requests_total",
+    "Unauthenticated Kalshi public API requests",
+    labelnames=["endpoint", "outcome"],
+)
+
+KALSHI_ARCHIVE_DAYS_TOTAL = Counter(
+    "kalshi_archive_days_total",
+    "City-days processed by the Kalshi market archive backfill",
+    labelnames=["city", "status"],
+)
+
+KALSHI_QUOTES_RECORDED_TOTAL = Counter(
+    "kalshi_quotes_recorded_total",
+    "Top-of-book quote snapshots recorded",
+    labelnames=["city"],
+)

@@ -20,6 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from backend import __version__
 from backend.api.accuracy import router as accuracy_router
+from backend.api.archive import router as archive_router
 from backend.api.auth import router as auth_router
 from backend.api.backtest import router as backtest_router
 from backend.api.calendar import router as calendar_router
@@ -281,6 +282,7 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
     app.include_router(backtest_router, prefix="/api/backtest", tags=["backtest"])
     app.include_router(accuracy_router, prefix="/api/accuracy", tags=["accuracy"])
+    app.include_router(archive_router, prefix="/api/archive", tags=["archive"])
     app.include_router(training_router, prefix="/api/training", tags=["training"])
     app.include_router(weather_router, prefix="/api/weather", tags=["weather"])
     app.include_router(version_router, prefix="/api/version", tags=["version"])

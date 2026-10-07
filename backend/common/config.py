@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     vapid_private_key: str | None = None
     vapid_email: str | None = None
 
+    # ─── Algo v2 ───
+    # Kalshi market archive + quote recorder (read-only public data; kill switch)
+    v2_archive_enabled: bool = True
+
     # ─── Self-Update Sidecar ───
     updater_url: str = "http://updater:9999"
     updater_secret: str = "changeme"

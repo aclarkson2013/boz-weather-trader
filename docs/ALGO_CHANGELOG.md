@@ -68,6 +68,24 @@
 
 ## Change history (algo-affecting)
 
+### v1.10.0 — Algo v2 S1: Kalshi market archive (2026-10-07) — *no trading behavior change*
+
+First code slice of the algo v2 rebuild (`docs/ALGO_V2_PRD.md`). Adds the data needed to backtest
+on **real** prices; v1 trading is untouched (still `manual`).
+
+- `backend/kalshi/public_client.py`: unauthenticated, rate-limited (2 req/s) client for Kalshi's
+  public market data, with 429/5xx retry + `Retry-After`.
+- `backend/kalshi/archive.py` + tasks: archives every settled KXHIGH* market (and the legacy
+  `HIGH*` series, used for events before 2024-10-24) from 2024-07-01: strikes, x.5 bounds, tiling
+  flag, outcome (`result` / `expiration_value`), era (E1 NWS CLI / E2 Weather Company from
+  2026-08-14), and hourly yes_bid/yes_ask candles. Resumable per city-day; hourly beat +
+  self-chaining. Also records live top-of-book quotes every 5 min (`kalshi_quotes`).
+- `GET /api/archive/coverage`: per city/month coverage, labels, median spread.
+- Migration 0020 (4 new tables). Kill switch: `V2_ARCHIVE_ENABLED=false`.
+- Verified live (2026-10-07) on one city-day per era: legacy NYC 2024-07-01 spreads 5–11¢,
+  AUS 2025-03-15 2–5¢, MIA 2026-10-01 1¢; bounds tile, winners match `expiration_value`.
+
+
 ### v1.9.16 — Weather-source toggles; default to a 3-source ensemble (2026-08-21)
 - **Files:** `backend/common/schemas.py`, `backend/common/models.py`,
   `backend/api/{deps,settings,response_schemas}.py`, `backend/prediction/scheduler.py`,
