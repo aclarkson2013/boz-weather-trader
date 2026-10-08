@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     # Kalshi market archive + quote recorder (read-only public data; kill switch)
     v2_archive_enabled: bool = True
 
+    # ─── Housekeeping ───
+    # Delete log_entries rows older than this many days (nightly). 0 = keep forever.
+    log_retention_days: int = 90
+
     # ─── Self-Update Sidecar ───
     updater_url: str = "http://updater:9999"
     updater_secret: str = "changeme"

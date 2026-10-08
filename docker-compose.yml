@@ -1,8 +1,18 @@
 name: boz-weather-trader
 
+# Cap every container's log: 5 rotated files x 20 MB (oldest dropped first).
+# App-level logs (log_entries table) have their own time-based retention
+# (LOG_RETENTION_DAYS, default 90).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   # ─── PostgreSQL Database ───
   postgres:
+    logging: *default-logging
     image: postgres:16
     restart: unless-stopped
     environment:
@@ -21,6 +31,7 @@ services:
 
   # ─── Redis (Cache + Celery Broker) ───
   redis:
+    logging: *default-logging
     image: redis:7
     restart: unless-stopped
     ports:
@@ -35,6 +46,7 @@ services:
 
   # ─── FastAPI Backend ───
   backend:
+    logging: *default-logging
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -62,6 +74,7 @@ services:
 
   # ─── Celery Worker (processes tasks) ───
   celery-worker:
+    logging: *default-logging
     image: boz-weather-trader-backend
     restart: unless-stopped
     env_file: .env.docker
@@ -84,6 +97,7 @@ services:
 
   # ─── Celery Beat (schedules tasks) ───
   celery-beat:
+    logging: *default-logging
     image: boz-weather-trader-backend
     restart: unless-stopped
     env_file: .env.docker
@@ -101,6 +115,7 @@ services:
 
   # ─── Next.js Frontend (PWA) ───
   frontend:
+    logging: *default-logging
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -117,6 +132,7 @@ services:
 
   # ─── Self-Update Sidecar ───
   updater:
+    logging: *default-logging
     build:
       context: ./scripts/updater
     restart: unless-stopped
@@ -130,6 +146,7 @@ services:
 
   # ─── Alertmanager (Alert Routing & Delivery) ───
   alertmanager:
+    logging: *default-logging
     image: prom/alertmanager:latest
     restart: unless-stopped
     ports:
@@ -139,6 +156,7 @@ services:
 
   # ─── Prometheus (Metrics Scraper & Store) ───
   prometheus:
+    logging: *default-logging
     image: prom/prometheus:latest
     restart: unless-stopped
     ports:
@@ -155,6 +173,7 @@ services:
 
   # ─── Grafana (Dashboards & Visualization) ───
   grafana:
+    logging: *default-logging
     image: grafana/grafana:latest
     restart: unless-stopped
     ports:
