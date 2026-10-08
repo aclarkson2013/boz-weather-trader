@@ -114,4 +114,30 @@ criteria in `docs/ALGO_V2_PRD.md` §6.
 
 ## 7. Amendments
 
-*(none)*
+### Amendment 1 — 2026-10-08: add L5 (forward-only longshot test); K 8 → 9
+
+**Disclosure:** this was written *after* seeing the development-window results for L1–L4 (all
+FAIL; see `docs/ALGO_CHANGELOG.md` v1.11.0). Every variant lost money over the full window, but
+all four were positive in the last chronological third, when spreads had tightened to about 1¢.
+That observation was made after the fact, so **no archived data may be used to evaluate L5**.
+Every row archived before this amendment counts as seen.
+
+**L5 — longshot NO fade, forward-only**
+
+- **Rule:** identical to L4. Buy NO on every bracket with 1 ≤ YES bid ≤ 4¢ at **D1L** (20:00
+  local, the day before), budget spread round-robin, $4 per city-day, taker fills, exact fees.
+- **Why this one variant:** among L1–L4 it had the smallest full-window loss and the largest
+  sample. Only one variant is added, to keep K small.
+- **Evaluation data:** only live paper trades (slice S5) whose decision time is after the S5
+  paper-trading start. No backtest on archived data counts.
+- **Pass criteria:** gate criteria 1–6 (§6), applied to the forward paper record, at the new
+  per-variant α. Criterion 1 (≥300 traded city-days, ≥40 per city, ≥6 months) means a verdict is
+  expected no sooner than about 6 months after paper trading starts. Criterion 7 (holdout) does
+  not apply: the forward record already is out-of-sample.
+- **Kill switch:** the S5 SPRT/CUSUM monitor runs on L5's paper record from day one. L5 is
+  dropped early if the SPRT stop boundary (ΣΛ ≤ −1.56) is crossed.
+
+**Multiple testing:** K becomes **9** (L1–L5 + B1–B4), so the per-variant α is
+**0.05 / 9 ≈ 0.00556** from this date. L1–L4 already failed at the looser 0.00625, so their
+verdicts are unchanged. B1–B4 (slice S4) and L5 are judged at 0.00556. The code constant
+`PREREGISTERED_K` changes to 9 in slice S4, before any B-variant is evaluated.

@@ -205,6 +205,14 @@ The full pre-registered definition is in `docs/research/v2-preregistration.md`. 
 - No off-VM uptime alert (the 2026-10-02 → 10-06 outage went unnoticed).
 - `best_yes_price_from_orderbook` treats bids as asks.
 
+## 9b. Status (2026-10-08)
+
+- S1 (archive) and S2 (real-price backtester) shipped (v1.10.0, v1.11.0).
+- Development verdicts: controls C0–C2 pass; longshot L1–L4 **fail**.
+- Pre-registration Amendment 1 adds L5, a forward-only longshot test judged on S5 paper
+  trading, and raises K to 9.
+- Next: S3 (forecast archive) → S4 (B1–B4) → S5 (paper trading, incl. L5).
+
 ## 10. Open questions
 
 1. Does the maker fee apply to KXHIGH? Check the order ticket or fee page before trusting any
