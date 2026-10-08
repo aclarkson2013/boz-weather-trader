@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -398,3 +398,47 @@ class ArchiveCoverageResponse(BaseModel):
     markets: int
     markets_with_candles: int
     rows: list[ArchiveCoverageRow]
+
+
+# ─── Algo v2: Research Reports (S2) ───
+
+
+class StrategyInfo(BaseModel):
+    """A pre-registered strategy that can be backtested."""
+
+    strategy_id: str
+    kind: str  # "control" / "market" / "model"
+    decisions: list[str]
+    params: dict
+
+
+class BacktestRequestV2(BaseModel):
+    """Queue a pre-registered real-price backtest (or its one-time holdout)."""
+
+    strategy_id: str
+    holdout: bool = False
+
+
+class ResearchReportSummary(BaseModel):
+    """List view of a research report."""
+
+    id: int
+    kind: str
+    strategy_id: str
+    status: str
+    gate_passed: bool | None
+    window_start: date
+    window_end: date
+    created_at: datetime | None
+    completed_at: datetime | None
+
+
+class ResearchReportDetail(ResearchReportSummary):
+    """Full research report incl. gate criteria / control verdict."""
+
+    params: dict
+    k: int
+    config_hash: str
+    app_version: str | None
+    results: dict | None
+    error: str | None

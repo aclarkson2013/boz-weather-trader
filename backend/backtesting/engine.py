@@ -11,6 +11,10 @@ Usage:
     from backend.backtesting.engine import run_backtest
 
     result = run_backtest(config, predictions, settlements)
+
+DEPRECATED for strategy decisions (algo v2): prices here are synthetic
+(model probability +- noise), so results cannot measure edge vs the market.
+Use ``backend/backtesting/real_engine.py`` (real Kalshi bid/ask history).
 """
 
 from __future__ import annotations

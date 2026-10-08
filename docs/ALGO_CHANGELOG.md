@@ -68,6 +68,60 @@
 
 ## Change history (algo-affecting)
 
+### v1.11.0 — Algo v2 S2: real-price backtester + pre-registered verdicts (2026-10-08) — *no trading behavior change*
+
+Second code slice (`docs/ALGO_V2_PRD.md`). v1 is untouched and still in `manual`.
+
+- **Real-price engine** (`backtesting/real_engine.py`): replays a strategy over the Kalshi archive.
+  Each fill is a taker fill at the archived bid/ask, with the exact per-order fee (`strategy/fees.py`)
+  and a $4 per city-day budget. It settles on Kalshi's recorded result. Snapshots
+  (`research/snapshots.py`) use the last hourly candle at or before the decision time (local civil
+  time, DST-safe), and outcomes are never visible to the strategy. The legacy synthetic engine is
+  marked deprecated.
+- **Scoring + gate** (`research/scoring.py`, `research/gate.py`):
+  - log loss / Brier / RPS;
+  - city-day stationary block bootstrap;
+  - gate criteria 1–6 from `docs/research/v2-preregistration.md` at α/K = 0.05/8;
+  - control checks C0–C2;
+  - holdout usable once per strategy, only after a dev PASS.
+- **Strategies** (`strategy/`): C0 null, C1 random taker, C2 v1 replica (v1's own `scan_bracket`
+  on stored predictions with `generated_at <= decision`), and L1–L4 longshot NO fade.
+- **API:** `POST /api/research/backtest`, `GET /api/research/reports[/{id}]`,
+  `GET /api/research/strategies`. Results are stored in `research_reports` (migration 0021).
+- **Archive fix:** Kalshi's historical data omits strikes on the winning market for events
+  2025-01-16..02-09. They are now inferred from the ticker, and those 100 non-tiling city-days are
+  re-archived automatically.
+- **Housekeeping:** `kalshi_quotes` older than 30 days are thinned to hourly.
+
+**S1 observe (2026-10-07):** the archive backfill completed:
+- 3,311 city-days (774 E1 + 54 E2 per city) and 619k hourly candles (127 MB);
+- 100 non-tiling city-days (the Kalshi quirk above);
+- average spread 7.7–10.9¢ (2024) → 2.8–4.6¢ (2025) → 1.0–1.4¢ (2026).
+
+**Pre-registered dev-window verdicts (read-only dry run on the live archive, 2026-10-08):**
+
+| ID | Result | Detail |
+|---|---|---|
+| C0 null | ✅ | P&L 0 |
+| C1 random taker | ✅ | −4.09¢/contract vs expected −3.62¢ (95% CI −5.59..−2.68) |
+| C2 v1 replica | ✅ | −$41.38 vs v1's real −$92.05 on the same city-days (same sign); **the harness reproduces v1's losses** |
+
+| ID | Traded city-days | Contracts | P&L | ¢/contract | Gate |
+|---|--:|--:|--:|--:|---|
+| L1 ≤2¢ @17:00 | 1,857 | 7,428 | −$45.74 | −0.62 | **FAIL** (lower bound −5.1¢/day) |
+| L2 ≤4¢ @17:00 | 2,360 | 9,440 | −$62.59 | −0.66 | **FAIL** |
+| L3 ≤2¢ @20:00 | 1,978 | 7,912 | −$25.06 | −0.32 | **FAIL** |
+| L4 ≤4¢ @20:00 | 2,441 | 9,764 | −$17.30 | −0.18 | **FAIL** |
+
+The longshot NO fade's reported +0.5–1.1¢/contract edge **does not replicate** on 2024-07..2026-06
+after exact fees. All four variants also fail robustness, consistency and risk (max drawdown
+$35–92 vs the $10 limit). Every variant is positive in the **last third** of the window
+(+0.9..+2.7¢/day, as spreads tightened), but that is a post-hoc observation. Under the
+pre-registration it cannot be acted on without a dated amendment (which increases K) and fresh
+out-of-sample data. Market baseline at 17:00 the day before: log loss 1.29, Brier 0.664, RPS 0.097.
+Official verdicts are re-run via the API after deploy, which includes the 100 repaired city-days.
+
+
 ### v1.10.0 — Algo v2 S1: Kalshi market archive (2026-10-07) — *no trading behavior change*
 
 First code slice of the algo v2 rebuild (`docs/ALGO_V2_PRD.md`). Adds the data needed to backtest

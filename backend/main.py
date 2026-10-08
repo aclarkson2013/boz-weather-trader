@@ -31,6 +31,7 @@ from backend.api.markets import router as markets_router
 from backend.api.notifications import router as notifications_router
 from backend.api.performance import router as performance_router
 from backend.api.queue import router as queue_router
+from backend.api.research import router as research_router
 from backend.api.settings import router as settings_router
 from backend.api.trades import router as trades_router
 from backend.api.training import router as training_router
@@ -283,6 +284,7 @@ def create_app() -> FastAPI:
     app.include_router(backtest_router, prefix="/api/backtest", tags=["backtest"])
     app.include_router(accuracy_router, prefix="/api/accuracy", tags=["accuracy"])
     app.include_router(archive_router, prefix="/api/archive", tags=["archive"])
+    app.include_router(research_router, prefix="/api/research", tags=["research"])
     app.include_router(training_router, prefix="/api/training", tags=["training"])
     app.include_router(weather_router, prefix="/api/weather", tags=["weather"])
     app.include_router(version_router, prefix="/api/version", tags=["version"])

@@ -46,6 +46,7 @@ celery_app.conf.update(
         "backend.prediction.train_models",
         "backend.kalshi.tasks",
         "backend.common.maintenance",
+        "backend.research.tasks",
     ],
 )
 
