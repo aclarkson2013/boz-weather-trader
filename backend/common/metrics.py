@@ -282,3 +282,10 @@ LOG_ENTRIES_PURGED_TOTAL = Counter(
     "log_entries_purged_total",
     "Log entries deleted by the nightly log-retention task",
 )
+
+
+FORECAST_ARCHIVE_CHUNKS_TOTAL = Counter(
+    "forecast_archive_chunks_total",
+    "Station/model/month chunks processed by the as-issued forecast archive",
+    labelnames=["model", "status"],
+)

@@ -499,3 +499,40 @@ class ResearchReport(Base):
     error = Column(Text, nullable=True)
     created_at = Column(TZNaiveDateTime, default=_utcnow)
     completed_at = Column(TZNaiveDateTime, nullable=True)
+
+
+# ─── Algo v2: as-issued forecast archive (slice S3) ───
+
+
+class ForecastIssuance(Base):
+    """A daily-max station forecast as issued by GFS MOS / NAM MOS / NBM (IEM archive)."""
+
+    __tablename__ = "forecast_issuances"
+
+    city = Column(Enum(CityEnum, native_enum=False), primary_key=True)
+    model = Column(String, primary_key=True)  # "GFS" / "NAM" / "NBS"
+    run_ts = Column(TZNaiveDateTime, primary_key=True)  # Model run time (UTC)
+    valid_date = Column(Date, primary_key=True)  # Local date the max applies to
+    station = Column(String, nullable=False)
+    available_at = Column(TZNaiveDateTime, nullable=False)  # run_ts + conservative latency
+    lead_hours = Column(Integer, nullable=True)
+    tmax_f = Column(Float, nullable=False)
+    tmax_sd_f = Column(Float, nullable=True)  # NBM spread (xnd); None for MOS
+    fetched_at = Column(TZNaiveDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_forecast_issuances_city_valid", "city", "valid_date"),)
+
+
+class ForecastArchiveChunk(Base):
+    """Forecast archive backfill progress per city / model / month."""
+
+    __tablename__ = "forecast_archive_chunks"
+
+    city = Column(Enum(CityEnum, native_enum=False), primary_key=True)
+    model = Column(String, primary_key=True)
+    month = Column(Date, primary_key=True)
+    status = Column(String, nullable=False)
+    rows = Column(Integer, default=0)
+    attempts = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    updated_at = Column(TZNaiveDateTime, default=_utcnow)

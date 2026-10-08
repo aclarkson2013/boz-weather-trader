@@ -442,3 +442,15 @@ class ResearchReportDetail(ResearchReportSummary):
     app_version: str | None
     results: dict | None
     error: str | None
+
+
+class ForecastCoverageRow(BaseModel):
+    """As-issued forecast archive coverage for one city / model / month."""
+
+    city: str
+    model: str
+    month: str  # "YYYY-MM" of the valid date
+    issuances: int
+    days: int
+    mean_sd_f: float | None
+    chunk_error: bool

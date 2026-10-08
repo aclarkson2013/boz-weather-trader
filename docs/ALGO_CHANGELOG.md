@@ -68,6 +68,24 @@
 
 ## Change history (algo-affecting)
 
+### v1.12.0 — Algo v2 S3: as-issued station forecast archive (2026-10-08) — *no trading behavior change*
+
+Inputs for the model-based strategies B1–B4 (slice S4).
+
+- **`weather/forecast_archive.py`:** archives the daily-max forecasts **as issued** by GFS MOS,
+  NAM MOS and NBM, plus NBM's spread (`xnd`), for KNYC/KMDW/KMIA/KAUS from 2024-06. Source is the
+  Iowa Environmental Mesonet bulk CSV.
+  - Max rows (00Z) map to the previous local date.
+  - `available_at = run + conservative latency` (GFS 5 h, NAM 4 h, NBM 2 h) for no-lookahead joins.
+- **Pacing:** IEM rate-limits hard, so requests are spaced 1 per 15 s with 429 backoff. The
+  backfill runs month by month per station and model, is resumable (`forecast_archive_chunks`), and
+  re-checks recent months every 6 h.
+- **Coverage endpoint:** `GET /api/archive/forecast-coverage`.
+- **Migration 0022:** `forecast_issuances`, `forecast_archive_chunks`.
+- **Refactor:** the shared upsert helper moved to `common/db_utils.py`.
+- **Live smoke test** (AUS, March 2025): GFS 125 runs / 313 rows, NAM 63 / 158, NBM 124 / 310.
+
+
 ### v1.11.0 — Algo v2 S2: real-price backtester + pre-registered verdicts (2026-10-08) — *no trading behavior change*
 
 Second code slice (`docs/ALGO_V2_PRD.md`). v1 is untouched and still in `manual`.

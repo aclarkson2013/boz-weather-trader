@@ -16,14 +16,24 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.deps import get_current_user
-from backend.api.response_schemas import ArchiveCoverageResponse, ArchiveCoverageRow
+from backend.api.response_schemas import (
+    ArchiveCoverageResponse,
+    ArchiveCoverageRow,
+    ForecastCoverageRow,
+)
 from backend.common.database import get_db
 from backend.common.logging import get_logger
-from backend.common.models import KalshiArchiveDay, KalshiArchivedMarket, User
+from backend.common.models import (
+    ForecastArchiveChunk,
+    ForecastIssuance,
+    KalshiArchiveDay,
+    KalshiArchivedMarket,
+    User,
+)
 from backend.kalshi.archive import ARCHIVE_START
 from backend.weather.stations import VALID_CITIES
 
@@ -123,3 +133,56 @@ async def get_archive_coverage(
         markets_with_candles=sum(r.markets_with_candles for r in rows),
         rows=rows,
     )
+
+
+@router.get("/forecast-coverage", response_model=list[ForecastCoverageRow])
+async def get_forecast_coverage(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ForecastCoverageRow]:
+    """Summarize the as-issued forecast archive per city, model and month (of valid date).
+
+    Args:
+        user: The authenticated user.
+        db: Async database session.
+
+    Returns:
+        One row per (city, model, month) with issuance and day counts.
+    """
+    day_rows = (
+        await db.execute(
+            select(
+                ForecastIssuance.city,
+                ForecastIssuance.model,
+                ForecastIssuance.valid_date,
+                func.count(),
+                func.avg(ForecastIssuance.tmax_sd_f),
+            ).group_by(ForecastIssuance.city, ForecastIssuance.model, ForecastIssuance.valid_date)
+        )
+    ).all()
+    agg: dict[tuple[str, str, str], dict] = defaultdict(
+        lambda: {"issuances": 0, "days": 0, "sds": []}
+    )
+    for city, model, valid_date, n, sd in day_rows:
+        a = agg[(_city_code(city), model, valid_date.strftime("%Y-%m"))]
+        a["issuances"] += n
+        a["days"] += 1
+        if sd is not None:
+            a["sds"].append(float(sd))
+    errors = {
+        (_city_code(c.city), c.model, c.month.strftime("%Y-%m"))
+        for c in (await db.execute(select(ForecastArchiveChunk))).scalars()
+        if c.status != "complete"
+    }
+    return [
+        ForecastCoverageRow(
+            city=city,
+            model=model,
+            month=month,
+            issuances=a["issuances"],
+            days=a["days"],
+            mean_sd_f=round(sum(a["sds"]) / len(a["sds"]), 2) if a["sds"] else None,
+            chunk_error=(city, model, month) in errors,
+        )
+        for (city, model, month), a in sorted(agg.items())
+    ]
