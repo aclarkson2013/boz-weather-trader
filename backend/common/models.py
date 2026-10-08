@@ -474,3 +474,28 @@ class KalshiArchiveDay(Base):
     attempts = Column(Integer, default=0)
     last_error = Column(Text, nullable=True)
     updated_at = Column(TZNaiveDateTime, default=_utcnow)
+
+
+# ─── Algo v2: research reports (slice S2) ───
+
+
+class ResearchReport(Base):
+    """One real-price backtest / control / holdout run of a pre-registered strategy."""
+
+    __tablename__ = "research_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    kind = Column(String, nullable=False)  # "backtest" / "control" / "holdout"
+    strategy_id = Column(String, nullable=False, index=True)
+    params = Column(JSON, nullable=True)
+    config_hash = Column(String, nullable=False)
+    k = Column(Integer, nullable=False)  # Pre-registered counted variants (alpha/K)
+    app_version = Column(String, nullable=True)
+    window_start = Column(Date, nullable=False)
+    window_end = Column(Date, nullable=False)
+    status = Column(String, nullable=False, default="queued")
+    gate_passed = Column(Boolean, nullable=True)
+    results = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(TZNaiveDateTime, default=_utcnow)
+    completed_at = Column(TZNaiveDateTime, nullable=True)

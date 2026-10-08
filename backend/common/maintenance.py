@@ -21,20 +21,21 @@ from datetime import UTC, datetime, timedelta
 
 from asgiref.sync import async_to_sync
 from celery import shared_task
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.common.config import get_settings
 from backend.common.database import get_task_session, reset_engine
 from backend.common.logging import get_logger
 from backend.common.metrics import LOG_ENTRIES_PURGED_TOTAL
-from backend.common.models import LogEntry
+from backend.common.models import KalshiQuote, LogEntry
 
 logger = get_logger("SYSTEM")
 
 PURGE_BATCH_SIZE = 20_000
 PURGE_BUDGET_SECONDS = 200.0
 PURGE_CHAIN_COUNTDOWN_SECONDS = 30
+QUOTE_FULL_RESOLUTION_DAYS = 30  # Older quotes are thinned to one snapshot per hour
 
 
 async def purge_old_log_entries(
@@ -108,10 +109,68 @@ async def purge_old_log_entries(
     return {"deleted": deleted, "cutoff": cutoff.isoformat(), "more_remaining": more_remaining}
 
 
+async def thin_old_quotes(
+    session_factory: Callable[[], Awaitable[AsyncSession]],
+    *,
+    now: datetime | None = None,
+    keep_days: int = QUOTE_FULL_RESOLUTION_DAYS,
+    batch_size: int = PURGE_BATCH_SIZE,
+    budget_seconds: float = PURGE_BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict:
+    """Thin ``kalshi_quotes`` older than ``keep_days`` to one snapshot per hour.
+
+    The recorder snapshots every 5 minutes (~14k rows/day). Full resolution is
+    only needed for recent fill-realism checks, so older rows keep just the
+    first snapshot of each hour (minute < 5).
+
+    Returns:
+        Dict with ``deleted`` count and ``more_remaining`` flag.
+    """
+    reference = now or datetime.now(UTC).replace(tzinfo=None)
+    cutoff = reference - timedelta(days=keep_days)
+    t0 = clock()
+    deleted = 0
+    more_remaining = False
+    session = await session_factory()
+    try:
+        while True:
+            if clock() - t0 >= budget_seconds:
+                more_remaining = True
+                break
+            batch = (
+                select(KalshiQuote.id)
+                .where(KalshiQuote.ts < cutoff, func.extract("minute", KalshiQuote.ts) >= 5)
+                .order_by(KalshiQuote.id)
+                .limit(batch_size)
+            )
+            result = await session.execute(delete(KalshiQuote).where(KalshiQuote.id.in_(batch)))
+            await session.commit()
+            n = result.rowcount or 0
+            deleted += n
+            if n < batch_size:
+                break
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+    if deleted:
+        logger.info(
+            "Old quote snapshots thinned to hourly",
+            extra={"data": {"deleted": deleted, "cutoff": cutoff.isoformat()}},
+        )
+    return {"deleted": deleted, "more_remaining": more_remaining}
+
+
 async def _purge_old_logs_async(retention_days: int) -> dict:
     """Run one budgeted purge pass with a fresh engine (Celery child process)."""
     reset_engine()
-    return await purge_old_log_entries(get_task_session, retention_days)
+    result = await purge_old_log_entries(get_task_session, retention_days)
+    quotes = await thin_old_quotes(get_task_session)
+    result["quotes_thinned"] = quotes["deleted"]
+    result["more_remaining"] = result["more_remaining"] or quotes["more_remaining"]
+    return result
 
 
 @shared_task(bind=True, soft_time_limit=240, time_limit=300)

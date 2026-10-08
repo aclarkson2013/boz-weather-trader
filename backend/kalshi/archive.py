@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import statistics
 import time
 from collections import Counter
@@ -197,6 +198,57 @@ def parse_market(raw: dict, source: str) -> dict | None:
     }
 
 
+def infer_missing_strikes(raw_markets: list[dict]) -> int:
+    """Fill in strikes Kalshi omitted, using the ticker suffix and sibling markets.
+
+    Kalshi's historical data for events 2025-01-16 .. 2025-02-09 lacks
+    ``strike_type`` / ``floor_strike`` / ``cap_strike`` on the WINNING market
+    only. The ticker still encodes the strike:
+    - ``B30.5`` -> "between", floor 30, cap 31 (covers integers 30-31)
+    - ``T75``   -> bottom ("less", cap 75) if 75 is at or below every sibling
+      middle's floor, else top ("greater", floor 75)
+
+    Mutates the raw dicts in place.
+
+    Args:
+        raw_markets: Raw market dicts of ONE event.
+
+    Returns:
+        Number of markets whose strikes were inferred.
+    """
+    middle_floors = [
+        float(m["floor_strike"])
+        for m in raw_markets
+        if m.get("floor_strike") is not None and m.get("cap_strike") is not None
+    ]
+    inferred = 0
+    for m in raw_markets:
+        if m.get("floor_strike") is not None or m.get("cap_strike") is not None:
+            continue
+        suffix = (m.get("ticker") or "").rsplit("-", 1)[-1].upper()
+        try:
+            value = float(suffix[1:])
+        except ValueError:
+            continue
+        if suffix.startswith("B"):
+            lo = math.floor(value)
+            m.update(strike_type="between", floor_strike=lo, cap_strike=lo + 1)
+        elif suffix.startswith("T"):
+            if not middle_floors or value <= min(middle_floors):
+                m.update(strike_type="less", floor_strike=None, cap_strike=value)
+            else:
+                m.update(strike_type="greater", floor_strike=value, cap_strike=None)
+        else:
+            continue
+        inferred += 1
+    if inferred:
+        logger.info(
+            "Inferred missing strikes from tickers",
+            extra={"data": {"event_ticker": raw_markets[0].get("event_ticker"), "count": inferred}},
+        )
+    return inferred
+
+
 def check_tiling(rows: list[dict]) -> bool:
     """Check that an event's brackets partition the temperature line exactly.
 
@@ -357,6 +409,7 @@ async def archive_event(
         raw = await client.get_event_markets(event_ticker, historical=not prefer_historical)
         source = "live" if prefer_historical else "historical"
 
+    infer_missing_strikes(raw)
     rows = [r for r in (parse_market(m, source) for m in raw) if r is not None]
     if not rows:
         return DAY_EMPTY, 0
@@ -410,7 +463,8 @@ async def pending_days(
         ).where(KalshiArchiveDay.event_date >= start, KalshiArchiveDay.event_date <= end)
     )
     done: set[tuple[str, date]] = set()
-    for city, d, status, attempts in result.all():
+    result_rows = result.all()
+    for city, d, status, attempts in result_rows:
         city_code = city.value if hasattr(city, "value") else str(city)
         if (
             status == DAY_COMPLETE
@@ -418,6 +472,25 @@ async def pending_days(
             or (status == DAY_ERROR and (attempts or 0) >= MAX_DAY_ATTEMPTS)
         ):
             done.add((city_code, d))
+
+    # Repair: "complete" days whose brackets don't tile are retried (e.g. after a
+    # parser fix) until they tile or run out of attempts.
+    broken = await session.execute(
+        select(KalshiArchivedMarket.city, KalshiArchivedMarket.event_date)
+        .where(
+            KalshiArchivedMarket.tiles_ok.is_(False),
+            KalshiArchivedMarket.event_date >= start,
+            KalshiArchivedMarket.event_date <= end,
+        )
+        .distinct()
+    )
+    attempts_by_day = {
+        (c.value if hasattr(c, "value") else str(c), d): a for c, d, _, a in result_rows
+    }
+    for city, d in broken.all():
+        key = (city.value if hasattr(city, "value") else str(city), d)
+        if (attempts_by_day.get(key) or 0) < MAX_DAY_ATTEMPTS:
+            done.discard(key)
 
     todo: list[tuple[str, date]] = []
     d = end

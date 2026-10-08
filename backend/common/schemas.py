@@ -323,3 +323,56 @@ class SyncResult(BaseModel):
     failed_count: int = 0
     errors: list[str] = Field(default_factory=list)
     synced_at: UTCDatetime
+
+
+# ─── Algo v2: real-price backtesting (slice S2) ───
+
+
+class BracketQuote(BaseModel):
+    """Top-of-book quote for one bracket market at a decision time.
+
+    Prices are integer cents of the YES contract. ``None`` means no quote on
+    that side (e.g. no bids). Outcomes are deliberately NOT included — the
+    backtest engine keeps them separate so strategies cannot peek.
+    """
+
+    ticker: str
+    label: str
+    lower_bound_f: float | None = None
+    upper_bound_f: float | None = None
+    yes_bid: int | None = None
+    yes_ask: int | None = None
+    quote_ts: datetime | None = None  # End of the candle the quote came from (naive UTC)
+
+
+class MarketSnapshot(BaseModel):
+    """Every bracket of one city-day event as seen at a decision time (no lookahead)."""
+
+    city: CityCode
+    event_date: date
+    decision: str  # "D1E" (17:00 day before), "D1L" (20:00 day before), "D0M" (10:00 event day)
+    decision_ts: datetime  # Naive UTC
+    quotes: list[BracketQuote]  # Ordered coldest -> warmest
+    tiles_ok: bool = True
+
+
+class StrategyOrder(BaseModel):
+    """An order a strategy wants to place against a snapshot (taker, buy side)."""
+
+    ticker: str
+    side: TradeSide
+    count: int = Field(ge=1)
+    model_probability: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class Fill(BaseModel):
+    """A simulated taker fill with exact per-order Kalshi fee."""
+
+    ticker: str
+    side: TradeSide
+    count: int = Field(ge=1)
+    price_cents: int = Field(ge=1, le=99)  # Paid per contract for the chosen side
+    fee_cents: int = Field(ge=0)  # For the whole order
+    mid_cents: float | None = None  # Side-adjusted mid at decision time (for cost analysis)
+    decision: str
+    decision_ts: datetime
