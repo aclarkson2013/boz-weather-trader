@@ -25,9 +25,10 @@ from backend.weather.stations import VALID_CITIES
 
 logger = get_logger("WEATHER")
 
-BUDGET_SECONDS = 150.0
+BUDGET_SECONDS = 200.0  # Stop starting new chunks after this; worst chunk adds ~5.5 min
 LOCK_KEY = "weather:forecast_archive:lock"
-LOCK_TTL_SECONDS = 280
+LOCK_TTL_SECONDS = 620
+ERROR_RETRY_COUNTDOWN_SECONDS = 120
 CHAIN_COUNTDOWN_SECONDS = 20
 
 
@@ -47,7 +48,7 @@ async def _run(budget_seconds: float) -> dict:
         await client.close()
 
 
-@shared_task(bind=True, soft_time_limit=240, time_limit=300)
+@shared_task(bind=True, soft_time_limit=540, time_limit=600)
 def archive_forecasts(self) -> dict:
     """Archive pending GFS/NAM/NBM station forecast months within a time budget.
 
@@ -68,6 +69,9 @@ def archive_forecasts(self) -> dict:
             "Forecast archive run failed",
             extra={"data": {"error": f"{type(exc).__name__}: {exc}"[:300]}},
         )
+        # Keep the chain alive: a crashed run must not stall the backfill until the
+        # next hourly beat (the 2026-10-08 SoftTimeLimitExceeded stall).
+        archive_forecasts.apply_async(countdown=ERROR_RETRY_COUNTDOWN_SECONDS)
         return {"status": "error", "error": str(exc)[:300]}
     finally:
         with contextlib.suppress(redis.exceptions.LockError):

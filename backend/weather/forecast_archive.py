@@ -53,8 +53,11 @@ MODEL_LATENCY: dict[str, timedelta] = {
 }
 MAX_COLUMN: dict[str, str] = {"GFS": "n_x", "NAM": "n_x", "NBS": "txn"}
 
-REQUEST_INTERVAL_SECONDS = 15.0
-MAX_RETRIES = 4
+REQUEST_INTERVAL_SECONDS = 20.0
+# Few retries per chunk keeps the worst case (2 waits + 3 timeouts ~ 4.5 min) inside the
+# task's time limit; a chunk that still fails is simply retried on a later run.
+MAX_RETRIES = 2
+REQUEST_TIMEOUT_SECONDS = 60.0
 MAX_CHUNK_ATTEMPTS = 5
 USER_AGENT = "BozWeatherTrader/1.11 (open-source research; respectful rate)"
 
@@ -141,7 +144,7 @@ class IEMMosClient:
     ) -> None:
         self._limiter = TokenBucketRateLimiter(rate=1.0 / interval_seconds, burst=1)
         self._client = http_client or httpx.AsyncClient(
-            timeout=120.0, headers={"User-Agent": USER_AGENT}
+            timeout=REQUEST_TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT}
         )
         self._sleep = sleep or asyncio.sleep
 
