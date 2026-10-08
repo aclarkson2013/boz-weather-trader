@@ -31,7 +31,7 @@ from backend.research.gate import (
     holdout_window,
     summarize,
 )
-from backend.strategy.registry import PREREGISTERED_K, get_strategy
+from backend.strategy.registry import FORWARD_ONLY, PREREGISTERED_K, get_strategy
 from backend.weather.stations import VALID_CITIES
 
 logger = get_logger("TRADING")
@@ -126,7 +126,17 @@ async def execute_report(session: AsyncSession, report: ResearchReport, today: d
         slippage_cents=1,
         score_market=False,
     )
-    gate = evaluate_gate(run, slipped, start, end, k=PREREGISTERED_K)
+    gate = evaluate_gate(
+        run,
+        slipped,
+        start,
+        end,
+        k=PREREGISTERED_K,
+        model_strategy=strategy.kind == "model",
+        daily_scores=getattr(strategy, "daily_scores", None),
+    )
+    if strategy.kind == "model":
+        payload["fits"] = getattr(strategy, "fit_log", [])
     payload["gate"] = gate
     return {**payload, "gate_passed": gate["passed"]}
 
@@ -147,6 +157,12 @@ async def create_report(
     except KeyError as exc:
         raise ReportError(f"Unknown strategy '{strategy_id}' (not pre-registered)") from exc
     today = today or datetime.now(UTC).date()
+
+    if strategy_id in FORWARD_ONLY:
+        raise ReportError(
+            f"{strategy_id} is forward-only (pre-registration Amendment 1): it is judged on "
+            "paper trading only, never on archived data"
+        )
 
     if holdout:
         if strategy.kind == "control":

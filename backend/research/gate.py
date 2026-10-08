@@ -81,6 +81,7 @@ def evaluate_gate(
     end: date,
     k: int,
     model_strategy: bool = False,
+    daily_scores: list[dict] | None = None,
 ) -> dict:
     """Evaluate gate criteria 1-6 for a counted variant on the development window.
 
@@ -159,12 +160,11 @@ def evaluate_gate(
         and sum(1 for v in thirds if v > 0) >= 2,
     }
 
-    # 5. Model-only criterion (edge slope + log-loss gain) — S4
-    crit["5_model_edge"] = {
-        "applicable": model_strategy,
-        "passed": not model_strategy,
-        "note": "evaluated in slice S4" if model_strategy else "market-only strategy: N/A",
-    }
+    # 5. Model-only: edge slope ~ 1 and positive out-of-sample log-loss gain vs market
+    if model_strategy:
+        crit["5_model_edge"] = model_edge_criterion(results, daily_scores or [], start, end)
+    else:
+        crit["5_model_edge"] = {"applicable": False, "passed": True}
 
     # 6. Risk: max drawdown and 5th-percentile 90-day P&L
     dd = max_drawdown([r.pnl_cents for r in results])
@@ -177,6 +177,84 @@ def evaluate_gate(
 
     passed = all(c["passed"] for c in crit.values())
     return {"criteria": crit, "passed": passed, "k": k}
+
+
+def edge_slope(results: list[CityDayResult]) -> dict:
+    """Regress realized (Y - cost) per contract on predicted edge, SEs clustered by city-day.
+
+    A calibrated edge estimate has slope ~ 1; slope ~ 0 means predicted edge is
+    noise (the winner's curse). Contract-weighted OLS with intercept.
+    """
+    xs, ys, ws, groups = [], [], [], []
+    for g, r in enumerate(results):
+        for f in r.fills:
+            if f.model_probability is None:
+                continue
+            cost = (f.price_cents + f.fee_cents / f.count) / 100.0
+            won = 1.0 if (r.outcomes or {}).get(f.ticker) == f.side else 0.0
+            xs.append(f.model_probability - cost)
+            ys.append(won - cost)
+            ws.append(f.count)
+            groups.append(g)
+    n = len(xs)
+    if n < 10:
+        return {"n_fills": n, "slope": None, "ci95": None, "passed": False}
+    X = np.column_stack([np.ones(n), np.array(xs)])
+    W = np.array(ws, dtype=float)
+    y = np.array(ys)
+    XtW = X.T * W
+    bread = np.linalg.pinv(XtW @ X)
+    beta = bread @ (XtW @ y)
+    resid = y - X @ beta
+    meat = np.zeros((2, 2))
+    g_arr = np.array(groups)
+    for g in np.unique(g_arr):
+        m = g_arr == g
+        s_g = (X[m].T * W[m]) @ resid[m]
+        meat += np.outer(s_g, s_g)
+    cov = bread @ meat @ bread
+    se = float(np.sqrt(max(cov[1, 1], 0.0)))
+    slope = float(beta[1])
+    lo, hi = slope - 1.96 * se, slope + 1.96 * se
+    return {
+        "n_fills": n,
+        "slope": round(slope, 4),
+        "ci95": [round(lo, 4), round(hi, 4)],
+        "passed": lo <= 1.0 <= hi and lo > 0,
+    }
+
+
+def model_edge_criterion(
+    results: list[CityDayResult], daily_scores: list[dict], start: date, end: date
+) -> dict:
+    """Gate criterion 5 for model strategies (pre-registration §6.5)."""
+    slope = edge_slope(results)
+    n = (end - start).days + 1
+    gain = np.zeros(n)
+    count = np.zeros(n)
+    for s in daily_scores:
+        i = (s["date"] - start).days
+        if 0 <= i < n:
+            gain[i] += s["ll_market"] - s["ll_model"]
+            count[i] += 1
+    if count.sum() == 0:
+        ll = {"n_city_days": 0, "mean_gain": None, "ci95": None, "passed": False}
+    else:
+        boot = bootstrap_ratio(gain, count)
+        boot = boot[~np.isnan(boot)]
+        lo, hi = float(np.quantile(boot, 0.025)), float(np.quantile(boot, 0.975))
+        ll = {
+            "n_city_days": int(count.sum()),
+            "mean_gain": round(float(gain.sum() / count.sum()), 5),
+            "ci95": [round(lo, 5), round(hi, 5)],
+            "passed": lo > 0,
+        }
+    return {
+        "applicable": True,
+        "edge_slope": slope,
+        "log_loss_gain": ll,
+        "passed": slope["passed"] and ll["passed"],
+    }
 
 
 def evaluate_control(

@@ -160,8 +160,21 @@ class TestV1Replica:
 
 class TestRegistry:
     def test_registered_ids_and_k(self) -> None:
-        assert set(STRATEGIES) == {"C0", "C1", "C2", "L1", "L2", "L3", "L4"}
-        assert PREREGISTERED_K == 8
+        assert set(STRATEGIES) == {
+            "C0",
+            "C1",
+            "C2",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5",
+            "B1",
+            "B2",
+            "B3",
+            "B4",
+        }
+        assert PREREGISTERED_K == 9  # Amendment 1
         assert get_strategy("L3").params == {"max_yes_bid": 2, "decision": "D1L"}
         assert get_strategy("C0").kind == "control"
         with pytest.raises(KeyError):

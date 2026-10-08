@@ -81,6 +81,7 @@ def fill_order(
         price_cents=price,
         fee_cents=kalshi_fee_cents(price, count),
         mid_cents=side_mid_cents(quote, order.side),
+        model_probability=order.model_probability,
         decision=decision,
         decision_ts=decision_ts,
     )

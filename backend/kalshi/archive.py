@@ -73,6 +73,7 @@ DAY_COMPLETE = "complete"
 DAY_EMPTY = "empty"
 DAY_UNSETTLED = "unsettled"
 DAY_ERROR = "error"
+DAY_IRREGULAR = "irregular"  # Settled, but not cleanly yes/no (e.g. "scalar")
 
 
 # ─── Pure helpers ───
@@ -384,7 +385,8 @@ async def archive_event(
         return DAY_EMPTY, 0
 
     check_tiling(rows)
-    settled = all(r["result"] in ("yes", "no") for r in rows)
+    settled = all(r["result"] is not None for r in rows)
+    irregular = settled and any(r["result"] not in ("yes", "no") for r in rows)
     if not settled:
         for r in rows:
             r.update(n_candles=None, median_spread_cents=None, candles_fetched_at=None)
@@ -409,7 +411,7 @@ async def archive_event(
         r.update(n_candles=n, median_spread_cents=median_spread, candles_fetched_at=fetched_at)
 
     await upsert_rows(session, KalshiArchivedMarket, rows, ["ticker"])
-    return DAY_COMPLETE, len(rows)
+    return (DAY_IRREGULAR if irregular else DAY_COMPLETE), len(rows)
 
 
 async def pending_days(
@@ -436,7 +438,7 @@ async def pending_days(
     for city, d, status, attempts in result_rows:
         city_code = city.value if hasattr(city, "value") else str(city)
         if (
-            status == DAY_COMPLETE
+            status in (DAY_COMPLETE, DAY_IRREGULAR)
             or (status == DAY_EMPTY and (attempts or 0) >= EMPTY_FINAL_AFTER_ATTEMPTS)
             or (status == DAY_ERROR and (attempts or 0) >= MAX_DAY_ATTEMPTS)
         ):

@@ -374,5 +374,6 @@ class Fill(BaseModel):
     price_cents: int = Field(ge=1, le=99)  # Paid per contract for the chosen side
     fee_cents: int = Field(ge=0)  # For the whole order
     mid_cents: float | None = None  # Side-adjusted mid at decision time (for cost analysis)
+    model_probability: float | None = None  # Strategy's P(side wins), for edge-slope checks
     decision: str
     decision_ts: datetime

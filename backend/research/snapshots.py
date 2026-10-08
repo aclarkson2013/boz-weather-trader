@@ -60,6 +60,7 @@ class ArchivedMarket:
     result: str | None
     tiles_ok: bool
     era: str
+    expiration_value: float | None = None
 
 
 @dataclass
@@ -110,6 +111,7 @@ async def load_city_archive(
                 result=m.result,
                 tiles_ok=bool(m.tiles_ok),
                 era=m.era,
+                expiration_value=m.expiration_value,
             )
         )
         tickers.append(m.ticker)

@@ -46,6 +46,7 @@ class CityDayResult:
     fee_cents: int
     contracts: int
     expected_taker_cost_cents: float  # Sum over fills of (price - mid) * count + fee
+    outcomes: dict[str, str] | None = None  # Filled ticker -> settled result
 
 
 @dataclass
@@ -143,6 +144,9 @@ async def run_real_backtest(
                     budget -= fill_cost_cents(fill)
                     fills.append(fill)
 
+            if outcomes and any(v not in ("yes", "no") for v in outcomes.values()):
+                run.excluded["irregular_settlement"] += 1
+                continue
             if excluded_reason == "brackets_do_not_tile":
                 run.excluded[excluded_reason] += 1
                 continue
@@ -163,6 +167,7 @@ async def run_real_backtest(
                     cost_cents=sum(f.price_cents * f.count for f in fills),
                     fee_cents=sum(f.fee_cents for f in fills),
                     contracts=sum(f.count for f in fills),
+                    outcomes={f.ticker: outcomes[f.ticker] for f in fills},
                     expected_taker_cost_cents=sum(
                         ((f.price_cents - f.mid_cents) * f.count if f.mid_cents is not None else 0)
                         + f.fee_cents
