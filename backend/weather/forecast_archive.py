@@ -223,6 +223,9 @@ async def archive_window(
     station = STATION_CONFIGS[city].station_id
     text = await client.fetch_csv(station, model, start, end)
     rows = parse_mos_csv(text, city, model)
+    # IEM occasionally repeats a run's rows (e.g. NBM, October 2025); one upsert
+    # statement can't touch the same key twice, so keep the last occurrence.
+    rows = list({(r["model"], r["run_ts"], r["valid_date"]): r for r in rows}.values())
     if not rows:
         logger.warning(
             "No forecast rows in IEM window (coverage gap)",
@@ -262,7 +265,14 @@ async def pending_chunks(
     done = set()
     for r in rows:
         key = (r.city.value if hasattr(r.city, "value") else str(r.city), r.model, r.month)
-        gave_up = (r.attempts or 0) >= MAX_CHUNK_ATTEMPTS and r.status != CHUNK_COMPLETE
+        # Failed chunks rest after MAX_CHUNK_ATTEMPTS, then get another round once
+        # their last attempt is older than REFRESH_RECENT_AFTER (fixes can land meanwhile).
+        gave_up = (
+            (r.attempts or 0) >= MAX_CHUNK_ATTEMPTS
+            and r.status != CHUNK_COMPLETE
+            and r.updated_at is not None
+            and now - r.updated_at < REFRESH_RECENT_AFTER
+        )
         fresh = r.updated_at is not None and now - r.updated_at < REFRESH_RECENT_AFTER
         if gave_up or (r.status == CHUNK_COMPLETE and (r.month not in recent or fresh)):
             done.add(key)
