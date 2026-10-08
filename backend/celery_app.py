@@ -47,6 +47,7 @@ celery_app.conf.update(
         "backend.kalshi.tasks",
         "backend.common.maintenance",
         "backend.research.tasks",
+        "backend.weather.forecast_archive_tasks",
     ],
 )
 
@@ -103,6 +104,11 @@ celery_app.conf.beat_schedule = {
     "purge-old-logs": {
         "task": "backend.common.maintenance.purge_old_logs",
         "schedule": crontab(hour=4, minute=30),  # Daily 4:30 AM ET (quiet hours)
+    },
+    # ─── Algo v2: as-issued forecast archive (S3) ───
+    "forecast-archive": {
+        "task": "backend.weather.forecast_archive_tasks.archive_forecasts",
+        "schedule": crontab(minute=40),  # Hourly; self-chains; IEM paced at 1 req / 15 s
     },
 }
 
