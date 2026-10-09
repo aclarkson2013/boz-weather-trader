@@ -254,3 +254,61 @@ class TestIEMClient:
         with pytest.raises(IEMRateLimitedError):
             await client.fetch_csv("KAUS", "GFS", datetime(2025, 3, 1), datetime(2025, 4, 1))
         await client.close()
+
+
+DUP_CSV = NBS_CSV + "2025-03-14 13:00:00,2025-03-16 00:00:00,NBS,73,80.0,2.0,KAUS" + chr(10)
+
+
+async def test_duplicate_rows_in_one_window_are_deduplicated(session_factory) -> None:
+    """IEM sometimes repeats rows; the upsert must not touch one key twice."""
+    client = FakeIEM({"NBS": DUP_CSV})
+    out = await run_forecast_backfill(
+        client,
+        session_factory,
+        cities=["AUS"],
+        start=date(2025, 3, 1),
+        end=date(2025, 3, 31),
+        budget_seconds=1e9,
+    )
+    assert out["statuses"].get(CHUNK_ERROR) is None
+    s = await session_factory()
+    rows = (
+        (await s.execute(select(ForecastIssuance).where(ForecastIssuance.model == "NBS")))
+        .scalars()
+        .all()
+    )
+    await s.close()
+    assert len(rows) == 1 and rows[0].tmax_f == 80.0  # last occurrence wins
+
+
+async def test_given_up_chunks_retry_after_rest(session_factory) -> None:
+    now = datetime(2026, 10, 8, 22, 0)
+    month = date(2025, 10, 1)
+    s = await session_factory()
+    s.add(
+        ForecastArchiveChunk(
+            city="NYC",
+            model="NBS",
+            month=month,
+            status=CHUNK_ERROR,
+            attempts=5,
+            updated_at=now - timedelta(hours=1),
+        )
+    )
+    s.add(
+        ForecastArchiveChunk(
+            city="CHI",
+            model="NBS",
+            month=month,
+            status=CHUNK_ERROR,
+            attempts=5,
+            updated_at=now - timedelta(hours=7),
+        )
+    )
+    await s.commit()
+    todo = await pending_chunks(
+        s, ["NYC", "CHI"], [month, date(2025, 11, 1), date(2025, 12, 1)], now=now
+    )
+    await s.close()
+    assert ("NYC", "NBS", month) not in todo  # still resting
+    assert ("CHI", "NBS", month) in todo  # rested long enough -> retried

@@ -53,8 +53,11 @@ MODEL_LATENCY: dict[str, timedelta] = {
 }
 MAX_COLUMN: dict[str, str] = {"GFS": "n_x", "NAM": "n_x", "NBS": "txn"}
 
-REQUEST_INTERVAL_SECONDS = 15.0
-MAX_RETRIES = 4
+REQUEST_INTERVAL_SECONDS = 20.0
+# Few retries per chunk keeps the worst case (2 waits + 3 timeouts ~ 4.5 min) inside the
+# task's time limit; a chunk that still fails is simply retried on a later run.
+MAX_RETRIES = 2
+REQUEST_TIMEOUT_SECONDS = 60.0
 MAX_CHUNK_ATTEMPTS = 5
 USER_AGENT = "BozWeatherTrader/1.11 (open-source research; respectful rate)"
 
@@ -141,7 +144,7 @@ class IEMMosClient:
     ) -> None:
         self._limiter = TokenBucketRateLimiter(rate=1.0 / interval_seconds, burst=1)
         self._client = http_client or httpx.AsyncClient(
-            timeout=120.0, headers={"User-Agent": USER_AGENT}
+            timeout=REQUEST_TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT}
         )
         self._sleep = sleep or asyncio.sleep
 
@@ -220,6 +223,9 @@ async def archive_window(
     station = STATION_CONFIGS[city].station_id
     text = await client.fetch_csv(station, model, start, end)
     rows = parse_mos_csv(text, city, model)
+    # IEM occasionally repeats a run's rows (e.g. NBM, October 2025); one upsert
+    # statement can't touch the same key twice, so keep the last occurrence.
+    rows = list({(r["model"], r["run_ts"], r["valid_date"]): r for r in rows}.values())
     if not rows:
         logger.warning(
             "No forecast rows in IEM window (coverage gap)",
@@ -259,7 +265,14 @@ async def pending_chunks(
     done = set()
     for r in rows:
         key = (r.city.value if hasattr(r.city, "value") else str(r.city), r.model, r.month)
-        gave_up = (r.attempts or 0) >= MAX_CHUNK_ATTEMPTS and r.status != CHUNK_COMPLETE
+        # Failed chunks rest after MAX_CHUNK_ATTEMPTS, then get another round once
+        # their last attempt is older than REFRESH_RECENT_AFTER (fixes can land meanwhile).
+        gave_up = (
+            (r.attempts or 0) >= MAX_CHUNK_ATTEMPTS
+            and r.status != CHUNK_COMPLETE
+            and r.updated_at is not None
+            and now - r.updated_at < REFRESH_RECENT_AFTER
+        )
         fresh = r.updated_at is not None and now - r.updated_at < REFRESH_RECENT_AFTER
         if gave_up or (r.status == CHUNK_COMPLETE and (r.month not in recent or fresh)):
             done.add(key)
