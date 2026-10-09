@@ -31,6 +31,14 @@ class TestCreateReport:
         assert r.k == 10  # Amendment 2
         assert r.params == {"max_yes_bid": 2, "decision": "D1E"}
 
+    async def test_model_strategies_use_warm_up_window(self, session_factory) -> None:
+        """Pre-registration §1: B-variants are evaluated on 2025-07-01 -> 2026-06-30."""
+        session = await session_factory()
+        r = await create_report(session, "B3", today=TODAY)
+        await session.close()
+        assert (r.window_start, r.window_end) == (date(2025, 7, 1), date(2026, 6, 30))
+        assert r.kind == "backtest"
+
     async def test_controls_kind_and_c2_window(self, session_factory) -> None:
         session = await session_factory()
         c0 = await create_report(session, "C0", today=TODAY)

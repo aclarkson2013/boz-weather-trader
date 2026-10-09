@@ -99,13 +99,18 @@ class CooldownManager:
             if now < cooldown_until:
                 remaining = (cooldown_until - now).total_seconds() / 60
 
-                # Determine if this is a rest-of-day cooldown
+                # Determine if this is a rest-of-day cooldown. Ending at ~23:59:59 alone is
+                # NOT enough: a per-loss cooldown started at ~22:59 ends there too. Only treat
+                # it as rest-of-day when the consecutive-loss limit was actually reached.
                 end_of_day = _get_end_of_trading_day()
                 if cooldown_until.tzinfo is None:
                     end_of_day_naive = end_of_day.replace(tzinfo=None)
-                    is_rest_of_day = abs((cooldown_until - end_of_day_naive).total_seconds()) < 60
+                    ends_at_eod = abs((cooldown_until - end_of_day_naive).total_seconds()) < 60
                 else:
-                    is_rest_of_day = abs((cooldown_until - end_of_day).total_seconds()) < 60
+                    ends_at_eod = abs((cooldown_until - end_of_day).total_seconds()) < 60
+                limit = self.settings.consecutive_loss_limit
+                limit_reached = limit > 0 and (state.consecutive_losses or 0) >= limit
+                is_rest_of_day = ends_at_eod and limit_reached
 
                 if is_rest_of_day:
                     # If the toggle is off, clear stale rest-of-day cooldown

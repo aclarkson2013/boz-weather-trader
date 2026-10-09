@@ -328,6 +328,8 @@ def holdout_mean(run: BacktestRun) -> dict:
 
 
 DEV_WINDOW = (date(2024, 7, 1), date(2026, 6, 30))
+# Model strategies need a 365-day training warm-up (pre-registration §1)
+MODEL_DEV_WINDOW = (date(2025, 7, 1), date(2026, 6, 30))
 HOLDOUT_START = date(2026, 7, 1)
 
 
