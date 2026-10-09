@@ -68,6 +68,33 @@
 
 ## Change history (algo-affecting)
 
+### v1.14.2 — S5b: Paper Test card; official B1–B4 verdicts (2026-10-09) — *no trading behavior change*
+
+- **Performance page:** a new **Paper Test** card shows L5 and B5 in plain language: pretend P&L,
+  trades, win rate, days running, progress toward the 300-trading-day verdict, and how close each
+  strategy is to its automatic shut-off (SPRT / CUSUM).
+- **Research report Celery task limit raised** to 55/60 min. The full-window B3/B4 runs took
+  ~21 min on the shared worker and finished just past the old 20-min soft limit (results were
+  saved intact).
+
+**Official B1–B4 development verdicts** (correct window 2025-07-01 → 2026-06-30; reports 12–15;
+reports 8–11 superseded):
+
+| ID | Traded city-days | P&L | ¢/contract | Gate | Failed criteria | Notes |
+|---|--:|--:|--:|---|---|---|
+| B1 NBM-direct @ D1E | 892 | **+$95.61** | +3.36 | FAIL | **5, 6 only** | profit LB +2.34¢/day; slope −0.18; drawdown $22.38 |
+| B2 NBM-direct @ D0M | 807 | −$9.44 | −0.73 | FAIL | 2, 3, 4, 5, 6 | |
+| B3 EMOS @ D1E | 862 | **+$87.01** | +3.52 | FAIL | **5, 6 only** | LB +2.73¢/day; robust; slope −0.21 [−0.58, 0.17]; drawdown $14.18; MIA +$49.67 |
+| B4 EMOS @ D0M | 730 | −$2.03 | −0.19 | FAIL | 2, 3, 4, 5, 6 | |
+
+**All four** have a positive out-of-sample log-loss gain over the market with a 95% CI above 0
+(B1 +0.023, B3 +0.022 nats). The models add information beyond the market price. The D1E
+variants make money robustly, but their trade-level edge estimates are not calibrated (criterion
+5) and their drawdowns exceed $10 (criterion 6). Consistent with the preliminary run.
+Per Amendment 2, **B5 (= B3) is being judged forward on paper trading**, which started
+2026-10-09.
+
+
 ### v1.14.1 — Model strategies use their pre-registered evaluation window (2026-10-09)
 
 Also fixes a **v1 risk bug** surfaced by CI running at 22:59 ET.

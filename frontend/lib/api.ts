@@ -280,6 +280,14 @@ export async function fetchModelEdge(
   );
 }
 
+// ─── Paper Test (algo v2) ───
+
+export async function fetchPaperStrategies(): Promise<
+  import("./types").PaperStrategySummary[]
+> {
+  return apiFetch<import("./types").PaperStrategySummary[]>("/api/paper/strategies");
+}
+
 // ─── Weather (1 endpoint) ───
 
 export async function fetchCurrentWeather(): Promise<CurrentWeatherResponse> {

@@ -23,6 +23,7 @@ import {
   fetchLogs,
   fetchMarkets,
   fetchModelEdge,
+  fetchPaperStrategies,
   fetchPendingTrades,
   fetchPerformance,
   fetchSettings,
@@ -237,6 +238,16 @@ export function useModelEdge(
     `/api/accuracy/edge?lookback_days=${lookbackDays}`,
     () => fetchModelEdge(lookbackDays),
     { refreshInterval: 0, ...config }
+  );
+}
+
+// ─── Paper Test (algo v2) ───
+
+export function usePaperStrategies(config?: SWRConfiguration) {
+  return useSWR<import("./types").PaperStrategySummary[]>(
+    "/api/paper/strategies",
+    () => fetchPaperStrategies(),
+    { refreshInterval: 300_000, ...config }
   );
 }
 
