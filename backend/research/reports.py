@@ -2,7 +2,8 @@
 
 Rules enforced here (docs/research/v2-preregistration.md):
 - Only registered strategy IDs run, with their registered parameters.
-- Default window = the development window (2024-07-01 -> 2026-06-30).
+- Default window = the development window (2024-07-01 -> 2026-06-30); model
+  strategies use 2025-07-01 -> 2026-06-30 (365-day training warm-up, §1).
 - Controls are judged against their expected behaviour; counted variants
   against the gate (criteria 1-6) with alpha/K.
 - The holdout (event dates >= 2026-07-01) can be used ONCE per strategy, and
@@ -25,6 +26,7 @@ from backend.common.logging import get_logger
 from backend.common.models import ResearchReport, Trade, TradeStatus
 from backend.research.gate import (
     DEV_WINDOW,
+    MODEL_DEV_WINDOW,
     evaluate_control,
     evaluate_gate,
     holdout_mean,
@@ -189,7 +191,7 @@ async def create_report(
         window = (V1_FIRST_PREDICTION, V1_PAUSE_DATE)  # v1's live window with stored predictions
         kind = "control"
     else:
-        window = DEV_WINDOW
+        window = MODEL_DEV_WINDOW if strategy.kind == "model" else DEV_WINDOW
         kind = "control" if strategy.kind == "control" else "backtest"
 
     report = ResearchReport(

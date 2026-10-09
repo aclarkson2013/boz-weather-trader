@@ -68,6 +68,23 @@
 
 ## Change history (algo-affecting)
 
+### v1.14.1 — Model strategies use their pre-registered evaluation window (2026-10-09)
+
+Bug: `create_report` gave B-variants the market-strategy window (2024-07-01 → 2026-06-30) instead of
+the pre-registered model window (**2025-07-01 → 2026-06-30**, which reserves 365 days of training
+warm-up; pre-registration §1). Official reports **8–11 (B1–B4, run 2026-10-09 02:50Z) used the wrong
+window and are SUPERSEDED**. They stay in `research_reports` for the audit trail, and the B1–B4
+verdicts are re-run on the correct window after this deploy. For transparency, the superseded
+results were:
+
+| ID | P&L | Gate | Failed criteria |
+|---|--:|---|---|
+| B1 | +$107.63 | FAIL | 2, 3, 5, 6 |
+| B2 | −$54.50 | FAIL | 2, 3, 4, 5, 6 |
+| B3 | +$119.83 | FAIL | 3, 5, 6 |
+| B4 | +$1.36 | FAIL | 2, 3, 5, 6 |
+
+
 ### v1.14.0 — Algo v2 S5a: live paper trading for forward-only L5 and B5 (2026-10-09) — *never places orders*
 
 Starts the forward tests pre-registered in Amendments 1 and 2. **v1 remains paused, and nothing here
