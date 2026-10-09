@@ -9,6 +9,7 @@ import PnlChart from "@/components/charts/pnl-chart";
 import SourceAccuracyChart from "@/components/charts/source-accuracy-chart";
 import TrainingLog from "@/components/charts/training-log";
 import ModelStatus from "@/components/model-status";
+import PaperTestCard from "@/components/paper-test-card";
 import EmptyState from "@/components/ui/empty-state";
 import ErrorBoundary from "@/components/ui/error-boundary";
 import Skeleton from "@/components/ui/skeleton";
@@ -16,6 +17,7 @@ import WeatherTicker from "@/components/weather-ticker/weather-ticker";
 import {
   useCalibration,
   useModelEdge,
+  usePaperStrategies,
   usePerformance,
   useSourceAccuracy,
   useTrainingReports,
@@ -33,6 +35,7 @@ export default function PerformancePage() {
   const { data: trainingReports, mutate: mutateTraining } =
     useTrainingReports();
   const { data: modelEdge } = useModelEdge();
+  const { data: paper } = usePaperStrategies();
 
   if (isLoading) {
     return (
@@ -275,6 +278,9 @@ export default function PerformancePage() {
             )}
           </div>
         )}
+
+        {/* Algo v2 forward paper test (pretend trades, no real money) */}
+        {paper && paper.length > 0 && <PaperTestCard strategies={paper} />}
 
         {/* Current Model Status */}
         {trainingReports && trainingReports.reports.length > 0 && (

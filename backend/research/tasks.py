@@ -17,9 +17,9 @@ async def _run(report_id: int) -> dict:
     return await run_report_by_id(get_task_session, report_id)
 
 
-@shared_task(bind=True, soft_time_limit=1200, time_limit=1260)
+@shared_task(bind=True, soft_time_limit=3300, time_limit=3600)
 def run_backtest_report(self, report_id: int) -> dict:
-    """Run one queued research report (a full backtest can take several minutes).
+    """Run one queued research report (model strategies can take ~20+ min on the VM).
 
     Args:
         report_id: ``research_reports.id`` of a queued report.

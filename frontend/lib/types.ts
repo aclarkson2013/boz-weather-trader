@@ -462,3 +462,26 @@ export interface ModelEdgeReport {
   by_side: Record<string, ModelEdgeBucket>;
   by_city: Record<string, ModelEdgeBucket>;
 }
+
+// ─── Algo v2: Paper Test ───
+
+export interface PaperStrategySummary {
+  strategy_id: string;
+  status: "active" | "stopped" | "not_started" | string;
+  started_at: string | null;
+  stopped_at: string | null;
+  stop_reason: string | null;
+  decisions: number;
+  trades_open: number;
+  trades_settled: number;
+  traded_city_days: number;
+  contracts: number;
+  pnl_cents: number;
+  wins: number;
+  infeasible_fills: number;
+  sprt_llr: number | null;
+  sprt_stop: number;
+  sprt_edge: number;
+  cusum_cents: number | null;
+  cusum_alarm_cents: number;
+}
