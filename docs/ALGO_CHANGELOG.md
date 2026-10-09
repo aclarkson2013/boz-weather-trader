@@ -68,6 +68,34 @@
 
 ## Change history (algo-affecting)
 
+### v1.14.0 — Algo v2 S5a: live paper trading for forward-only L5 and B5 (2026-10-09) — *never places orders*
+
+Starts the forward tests pre-registered in Amendments 1 and 2. **v1 remains paused, and nothing here
+can place or queue a real order** (a safety test asserts that the executor and the queue are never
+called).
+
+- **`strategy/paper.py` + `paper_tasks.py`:**
+  - Every 15 min, each active forward-only strategy (L5: longshot NO fade @ 20:00 local D-1;
+    B5: B3 rule @ 17:00 local D-1) acts once per city-day within 90 min of its decision time.
+  - Decisions use live Kalshi quotes (`strategy/live.py`, the same `MarketSnapshot` as the
+    backtester). Fills are simulated as taker fills with the exact fee and a $4/city-day budget,
+    flagged `fill_feasible=False` when the displayed size couldn't absorb them.
+  - Every decision is recorded, including "no orders".
+  - B5 refreshes the latest NBM/GFS/NAM issuances before deciding and uses only those available at
+    the decision time.
+- **Settlement + kill switch** (hourly):
+  - Paper trades settle on Kalshi's `result`; "scalar" settlements are voided.
+  - `strategy/monitor.py` runs an SPRT (stop at ΣΛ ≤ −1.56) and a CUSUM ($10 of unrecovered loss).
+  - Either one permanently stops that strategy and sends a push notification.
+- **API:** `GET /api/paper/strategies`, `GET /api/paper/trades`.
+- **Migration 0023:** `paper_trades`, `paper_decisions`, `paper_strategy_state`.
+- **Kill switch for the whole test:** `V2_PAPER_ENABLED=false`.
+- `PREREGISTERED_K = 10`; B5 is registered as forward-only (the backtest API refuses it).
+- **Live smoke** (read-only, 2026-10-08, against the next day's real markets):
+  - L5 picked the 1¢ brackets in all four cities.
+  - B5 (October fit: α 0.10, β 1.14) found 3 trades (MIA ×2, AUS ×1) and none in NYC/CHI.
+
+
 ### v1.13.0 — Algo v2 S4: model-based strategies B1–B4 (2026-10-08) — *no trading behavior change*
 
 Last pre-registered strategy family (`docs/research/v2-preregistration.md` §4, Amendment 1).

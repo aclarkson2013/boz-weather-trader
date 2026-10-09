@@ -242,7 +242,7 @@ def test_forward_only_and_k() -> None:
     from backend.strategy.registry import FORWARD_ONLY, PREREGISTERED_K
 
     assert "L5" in FORWARD_ONLY
-    assert PREREGISTERED_K == 9
+    assert PREREGISTERED_K == 10  # Amendment 2
 
 
 async def test_l5_backtest_refused(session_factory) -> None:

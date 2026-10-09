@@ -28,7 +28,7 @@ class TestCreateReport:
         assert (r.window_start, r.window_end) == DEV_WINDOW
         assert r.kind == "backtest"
         assert r.status == "queued"
-        assert r.k == 9  # Amendment 1
+        assert r.k == 10  # Amendment 2
         assert r.params == {"max_yes_bid": 2, "decision": "D1E"}
 
     async def test_controls_kind_and_c2_window(self, session_factory) -> None:

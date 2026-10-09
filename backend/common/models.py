@@ -536,3 +536,70 @@ class ForecastArchiveChunk(Base):
     attempts = Column(Integer, default=0)
     last_error = Column(Text, nullable=True)
     updated_at = Column(TZNaiveDateTime, default=_utcnow)
+
+
+# ─── Algo v2: paper trading (slice S5) — never places real orders ───
+
+
+class PaperTrade(Base):
+    """A simulated taker fill of a forward-only strategy on a live quote."""
+
+    __tablename__ = "paper_trades"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_id = Column(String, nullable=False)
+    city = Column(Enum(CityEnum, native_enum=False), nullable=False)
+    event_date = Column(Date, nullable=False)
+    decision = Column(String, nullable=False)
+    decision_ts = Column(TZNaiveDateTime, nullable=False)
+    quoted_at = Column(TZNaiveDateTime, nullable=False)
+    ticker = Column(String, nullable=False)
+    label = Column(String, nullable=True)
+    side = Column(String, nullable=False)
+    count = Column(Integer, nullable=False)
+    price_cents = Column(Integer, nullable=False)
+    fee_cents = Column(Integer, nullable=False)
+    yes_bid = Column(Integer, nullable=True)
+    yes_ask = Column(Integer, nullable=True)
+    available_size = Column(Float, nullable=True)  # Displayed size on the side we'd hit
+    fill_feasible = Column(Boolean, nullable=False, default=False)
+    model_probability = Column(Float, nullable=True)  # Strategy's P(side wins)
+    status = Column(String, nullable=False, default="open")  # open / settled / void
+    result = Column(String, nullable=True)
+    pnl_cents = Column(Integer, nullable=True)
+    settled_at = Column(TZNaiveDateTime, nullable=True)
+    created_at = Column(TZNaiveDateTime, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_paper_trades_strategy_status", "strategy_id", "status"),
+        Index("ix_paper_trades_event", "city", "event_date"),
+    )
+
+
+class PaperDecision(Base):
+    """One paper decision (incl. "no orders") per strategy x city x event day x time."""
+
+    __tablename__ = "paper_decisions"
+
+    strategy_id = Column(String, primary_key=True)
+    city = Column(Enum(CityEnum, native_enum=False), primary_key=True)
+    event_date = Column(Date, primary_key=True)
+    decision = Column(String, primary_key=True)
+    decided_at = Column(TZNaiveDateTime, nullable=False)
+    n_orders = Column(Integer, default=0)
+    note = Column(Text, nullable=True)
+
+
+class PaperStrategyState(Base):
+    """Forward-test status and kill-switch statistics of a paper strategy."""
+
+    __tablename__ = "paper_strategy_state"
+
+    strategy_id = Column(String, primary_key=True)
+    status = Column(String, nullable=False)  # active / stopped
+    started_at = Column(TZNaiveDateTime, nullable=False)
+    stopped_at = Column(TZNaiveDateTime, nullable=True)
+    stop_reason = Column(Text, nullable=True)
+    sprt_llr = Column(Float, nullable=True)
+    cusum_cents = Column(Float, nullable=True)
+    last_evaluated_at = Column(TZNaiveDateTime, nullable=True)

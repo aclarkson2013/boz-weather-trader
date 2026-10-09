@@ -160,6 +160,10 @@ class BenterStrategy(BaseStrategy):
         self._inputs: dict[tuple[str, date], DayInputs] = {}
         self._fits: dict[date, tuple[np.ndarray, np.ndarray]] = {}
         self.daily_scores: list[dict] = []  # Per eval city-day: model vs market log loss
+        # Kept from prepare() so live (not yet archived) days can be scored too
+        self._issuances: dict[str, object] = {}
+        self._labels: dict[str, dict[date, float]] = {}
+        self._emos_cache: dict[str, dict] = {}
         self.fit_log: list[dict] = []
 
     # ── preparation (walk-forward) ──
@@ -179,6 +183,9 @@ class BenterStrategy(BaseStrategy):
                     labels[d] = values[0]
 
             emos_fits: dict[date, EmosParams | None] = {}
+            self._issuances[city] = issuances
+            self._labels[city] = labels
+            self._emos_cache[city] = emos_fits
 
             d = hist_start
             while d <= end:
@@ -274,6 +281,49 @@ class BenterStrategy(BaseStrategy):
                         ys.append(y)
             cache[month] = fit_emos(xs, ys)
         return cache[month]
+
+    def add_live_snapshot(self, snapshot: MarketSnapshot) -> bool:
+        """Compute model inputs for a live (not yet archived) city-day.
+
+        Requires ``prepare()`` to have loaded that city. Uses only forecast
+        issuances available at the snapshot's scheduled decision time.
+
+        Returns:
+            True if inputs were computed and ``decide()`` can run.
+        """
+        city, d = snapshot.city, snapshot.event_date
+        issuances = self._issuances.get(city)
+        if issuances is None or not snapshot.tiles_ok or len(snapshot.quotes) != 6:
+            return False
+        q = market_probabilities(snapshot)
+        feats = features_at(issuances, d, snapshot.decision_ts)
+        if q is None or feats is None:
+            return False
+        bounds = [(qq.lower_bound_f, qq.upper_bound_f) for qq in snapshot.quotes]
+        params = (
+            self._emos_for(
+                month_start(d), city, self._labels[city], issuances, self._emos_cache[city]
+            )
+            if self.model == "emos"
+            else None
+        )
+        if params is not None:
+            mu, sigma = params.predict(feats)
+            pm = bracket_probs(mu, sigma, bounds)
+        else:
+            pm = nbm_direct_probs(feats, bounds)
+        self._inputs[(city, d)] = DayInputs(
+            log_pm=np.log(np.clip(np.array(pm), EPS, None)),
+            log_q=np.log(np.clip(np.array(q), EPS, None)),
+            tail=np.array(
+                [
+                    1.0 if (qq.lower_bound_f is None or qq.upper_bound_f is None) else 0.0
+                    for qq in snapshot.quotes
+                ]
+            ),
+            winner=None,
+        )
+        return True
 
     # ── decisions ──
 
