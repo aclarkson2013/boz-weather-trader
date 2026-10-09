@@ -68,6 +68,33 @@
 
 ## Change history (algo-affecting)
 
+### v1.13.0 — Algo v2 S4: model-based strategies B1–B4 (2026-10-08) — *no trading behavior change*
+
+Last pre-registered strategy family (`docs/research/v2-preregistration.md` §4, Amendment 1).
+
+- **Model probabilities** (`research/forecast_models.py`):
+  - NBM-direct: Normal(txn, xnd) → brackets.
+  - Station EMOS/NGR: μ = a + b1·NBM + b2·MOS with b ≥ 0, log σ = c + d·log(NBM sd), fit by
+    closed-form min-CRPS. Refit monthly per city on labels in [t−365, t−2].
+  - Features come only from issuances with `available_at ≤ decision` (no lookahead).
+- **Benter combination** (`strategy/benter.py`):
+  - P = softmax(α·log p_model + β·log q + γ·tail), q = normalized market mids.
+  - MAP fit with fixed priors α~N(0,.25²), β~N(1,.25²), γ~N(0,.5²); pooled cities, refit
+    monthly, walk-forward. Training-day model probabilities are themselves out-of-sample.
+  - Laplace posterior, 200 draws. Trades only if the 10th-percentile edge after the exact fee is
+    > 0; fractional Kelly λ=0.1, at least 1 contract, $4/city-day cap.
+- **Gate criterion 5 implemented** (`research/gate.py`):
+  - Edge slope: contract-weighted OLS with SEs clustered by city-day; the 95% CI must contain 1
+    and exclude 0.
+  - Paired out-of-sample log-loss gain vs the market: block-bootstrap 95% CI > 0.
+- **Registry:**
+  - B1 (NBM-direct @ D1E), B2 (NBM-direct @ D0M), B3 (EMOS @ D1E), B4 (EMOS @ D0M).
+  - L5 registered as **forward-only**: the backtest API refuses it.
+  - `PREREGISTERED_K = 9` (Amendment 1).
+- **Fix:** Kalshi "scalar" (fair-price) settlements, e.g. MIA 2026-04-11, are archived as final
+  `irregular` days (no more hourly retries) and excluded from backtests and scoring.
+
+
 ### v1.12.0 — Algo v2 S3: as-issued station forecast archive (2026-10-08) — *no trading behavior change*
 
 Inputs for the model-based strategies B1–B4 (slice S4).
