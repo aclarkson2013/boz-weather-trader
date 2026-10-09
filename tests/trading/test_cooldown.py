@@ -11,7 +11,7 @@ Two cooldown types:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -434,3 +434,45 @@ class TestOnTradeWin:
             await cm.on_trade_win()
 
         assert mock_state.consecutive_losses == 0
+
+
+class TestLateEveningPerLossCooldown:
+    """Regression: a per-loss cooldown started ~1 h before midnight ET ends at ~23:59:59,
+    the same instant as a rest-of-day cooldown. It must not be mistaken for one (which,
+    with the consecutive-loss toggle off, used to CLEAR a legitimate cooldown).
+    Surfaced by CI running at 22:59 ET on 2026-10-09.
+    """
+
+    @pytest.mark.asyncio
+    async def test_per_loss_cooldown_at_2259_et_is_not_rest_of_day(
+        self, user_settings: UserSettings
+    ) -> None:
+        settings = user_settings.model_copy(
+            update={
+                "enable_consecutive_loss_limit": False,
+                "enable_per_loss_cooldown": True,
+                "cooldown_per_loss_minutes": 60,
+            }
+        )
+        frozen = datetime(2026, 10, 8, 22, 59, 53, tzinfo=ET)
+
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ANN001, ANN206
+                return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
+
+        mock_state = MagicMock(spec=DailyRiskState)
+        mock_state.cooldown_until = frozen + timedelta(minutes=60)  # 23:59:53 ET
+        mock_state.consecutive_losses = 1
+
+        cm = _make_cm(settings, state=mock_state)
+        with (
+            patch("backend.trading.cooldown.datetime", FrozenDatetime),
+            patch("backend.trading.risk_manager.get_trading_day", return_value=date(2026, 10, 8)),
+            patch.object(cm, "_get_daily_state", return_value=mock_state),
+        ):
+            is_active, reason = await cm.is_cooldown_active()
+
+        assert is_active is True
+        assert "per-loss" in reason.lower()
+        assert mock_state.cooldown_until is not None  # not wrongly cleared

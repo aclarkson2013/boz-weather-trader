@@ -70,6 +70,17 @@
 
 ### v1.14.1 — Model strategies use their pre-registered evaluation window (2026-10-09)
 
+Also fixes a **v1 risk bug** surfaced by CI running at 22:59 ET.
+
+- **The bug:** `CooldownManager.is_cooldown_active` decided that a cooldown was the
+  consecutive-loss "rest of day" kind purely because it ended at about 23:59:59 ET. A 60-minute
+  per-loss cooldown started around 22:59 ET also ends then.
+- **The effect:** with `enable_consecutive_loss_limit` off, that per-loss cooldown was wrongly
+  **cleared**.
+- **The fix:** it is now rest-of-day only if the consecutive-loss limit was actually reached.
+- **Test:** a regression test freezes the clock at 22:59:53 ET.
+- **Live impact:** none while v1 stays in `manual`.
+
 Bug: `create_report` gave B-variants the market-strategy window (2024-07-01 → 2026-06-30) instead of
 the pre-registered model window (**2025-07-01 → 2026-06-30**, which reserves 365 days of training
 warm-up; pre-registration §1). Official reports **8–11 (B1–B4, run 2026-10-09 02:50Z) used the wrong
