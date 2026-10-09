@@ -68,6 +68,22 @@
 
 ## Change history (algo-affecting)
 
+### v1.14.3 — Faster, smaller deploys: keep the dependency layer cached (2026-10-09) — *infra only*
+
+The v1.14.2 self-update **timed out and never deployed** on 2026-10-09:
+
+- `Dockerfile.backend` copied `VERSION` before `pip install`, so every release busted the layer
+  cache and reinstalled every package. That took 33 min on the homelab VM, and writing the
+  2.2 GB image took another 38 min, which hit the updater's 1-hour limit.
+- Each release had also left a 2.2 GB dangling image behind. The disk grew from 31 to 51 GB (83%)
+  in two days, which slowed I/O further.
+
+**Fix:** only `pyproject.toml` feeds the dependency layer. A placeholder `VERSION` satisfies
+setuptools during the install, and the real `VERSION` is copied after the code and read at
+runtime. A test guards the ordering. The next build reinstalls once; later releases reuse the
+cached layer.
+
+
 ### v1.14.2 — S5b: Paper Test card; official B1–B4 verdicts (2026-10-09) — *no trading behavior change*
 
 - **Performance page:** a new **Paper Test** card shows L5 and B5 in plain language: pretend P&L,

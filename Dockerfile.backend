@@ -7,14 +7,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (VERSION needed for dynamic versioning)
-COPY pyproject.toml VERSION ./
-RUN pip install --no-cache-dir .
+# Install Python dependencies. Only pyproject.toml feeds this layer, so it stays
+# cached across releases: bumping VERSION used to invalidate it and reinstall every
+# package (~30 min on the homelab VM, 2026-10-09). A placeholder VERSION satisfies
+# setuptools' dynamic versioning; the real one is copied below and read at runtime.
+COPY pyproject.toml ./
+RUN echo "0.0.0" > VERSION && pip install --no-cache-dir . && rm VERSION
 
 # Copy application code
 COPY backend/ backend/
 COPY alembic/ alembic/
 COPY alembic.ini .
+COPY VERSION ./
 
 # Copy entrypoint script
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
