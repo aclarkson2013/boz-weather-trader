@@ -173,8 +173,9 @@ class TestRegistry:
             "B2",
             "B3",
             "B4",
+            "B5",
         }
-        assert PREREGISTERED_K == 9  # Amendment 1
+        assert PREREGISTERED_K == 10  # Amendment 2
         assert get_strategy("L3").params == {"max_yes_bid": 2, "decision": "D1L"}
         assert get_strategy("C0").kind == "control"
         with pytest.raises(KeyError):

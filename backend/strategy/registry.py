@@ -15,10 +15,10 @@ from backend.strategy.controls import NullStrategy, RandomTakerStrategy
 from backend.strategy.longshot import LongshotFadeStrategy
 from backend.strategy.v1_replica import V1ReplicaStrategy
 
-PREREGISTERED_K = 9  # L1-L5 + B1-B4 (Amendment 1, 2026-10-08); changes need an amendment
+PREREGISTERED_K = 10  # L1-L5 + B1-B5 (Amendment 2, 2026-10-09); changes need an amendment
 
 # Strategies that may only be judged on forward paper trading (Amendment 1)
-FORWARD_ONLY: frozenset[str] = frozenset({"L5"})
+FORWARD_ONLY: frozenset[str] = frozenset({"L5", "B5"})
 
 STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "C0": NullStrategy,
@@ -33,6 +33,7 @@ STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "B2": lambda: BenterStrategy("B2", model="nbm", decision="D0M"),
     "B3": lambda: BenterStrategy("B3", model="emos", decision="D1E"),
     "B4": lambda: BenterStrategy("B4", model="emos", decision="D0M"),
+    "B5": lambda: BenterStrategy("B5", model="emos", decision="D1E"),  # = B3, forward-only
 }
 
 

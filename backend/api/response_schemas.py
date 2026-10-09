@@ -454,3 +454,50 @@ class ForecastCoverageRow(BaseModel):
     days: int
     mean_sd_f: float | None
     chunk_error: bool
+
+
+# ─── Algo v2: Paper Trading (S5) ───
+
+
+class PaperStrategySummary(BaseModel):
+    """Forward paper test progress for one strategy."""
+
+    strategy_id: str
+    status: str  # active / stopped / not_started
+    started_at: datetime | None
+    stopped_at: datetime | None
+    stop_reason: str | None
+    decisions: int
+    trades_open: int
+    trades_settled: int
+    traded_city_days: int
+    contracts: int
+    pnl_cents: int
+    wins: int
+    infeasible_fills: int
+    sprt_llr: float | None
+    sprt_stop: float
+    sprt_edge: float
+    cusum_cents: float | None
+    cusum_alarm_cents: int
+
+
+class PaperTradeRow(BaseModel):
+    """One paper trade."""
+
+    id: int
+    strategy_id: str
+    city: str
+    event_date: date
+    ticker: str
+    label: str | None
+    side: str
+    count: int
+    price_cents: int
+    fee_cents: int
+    model_probability: float | None
+    fill_feasible: bool
+    status: str
+    result: str | None
+    pnl_cents: int | None
+    quoted_at: datetime

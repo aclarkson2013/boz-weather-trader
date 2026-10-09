@@ -48,6 +48,7 @@ celery_app.conf.update(
         "backend.common.maintenance",
         "backend.research.tasks",
         "backend.weather.forecast_archive_tasks",
+        "backend.strategy.paper_tasks",
     ],
 )
 
@@ -109,6 +110,15 @@ celery_app.conf.beat_schedule = {
     "forecast-archive": {
         "task": "backend.weather.forecast_archive_tasks.archive_forecasts",
         "schedule": crontab(minute=40),  # Hourly; self-chains; IEM paced at 1 req / 15 s
+    },
+    # ─── Algo v2: paper trading (S5) — never places orders ───
+    "paper-cycle": {
+        "task": "backend.strategy.paper_tasks.paper_cycle",
+        "schedule": crontab(minute="7,22,37,52"),  # Decisions due within a 90-min window
+    },
+    "paper-settle": {
+        "task": "backend.strategy.paper_tasks.paper_settle",
+        "schedule": crontab(minute=50),  # Hourly settlement + kill switch
     },
 }
 
