@@ -211,7 +211,11 @@ The full pre-registered definition is in `docs/research/v2-preregistration.md`. 
 - Development verdicts: controls C0–C2 pass; longshot L1–L4 **fail**.
 - Pre-registration Amendment 1 adds L5, a forward-only longshot test judged on S5 paper
   trading, and raises K to 9.
-- Next: S3 (forecast archive) → S4 (B1–B4) → S5 (paper trading, incl. L5).
+- S3 (forecast archive) and S4 (B1–B4) shipped (v1.12.x, v1.13.0). Preliminary B1–B4 verdicts:
+  all FAIL. B3 made +$82 and passed criteria 1–4 but failed 5 (edge slope) and 6 (drawdown).
+  All four show a significant out-of-sample log-loss gain over the market.
+- Amendment 2 (2026-10-09) adds B5 = B3 unchanged, judged forward-only on paper; K = 10.
+- Next: S5 (paper trading for L5 and B5), with no real money until a forward verdict passes.
 
 ## 10. Open questions
 
