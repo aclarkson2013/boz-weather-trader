@@ -141,3 +141,46 @@ Every row archived before this amendment counts as seen.
 **0.05 / 9 ≈ 0.00556** from this date. L1–L4 already failed at the looser 0.00625, so their
 verdicts are unchanged. B1–B4 (slice S4) and L5 are judged at 0.00556. The code constant
 `PREREGISTERED_K` changes to 9 in slice S4, before any B-variant is evaluated.
+
+### Amendment 2 — 2026-10-09: add B5 (forward-only test of B3); K 9 → 10
+
+**Disclosure:** this was written *after* seeing the preliminary development-window results for
+B1–B4 (read-only dry run, 2025-07..2026-06, with NBM October 2025 missing). The development
+verdicts for B1–B4 stand as recorded; this amendment changes none of them.
+
+| ID | P&L | Passed | Failed |
+|---|---|---|---|
+| B3 | +$82.28 over 749 city-days | criteria 1–4 | 5 (edge slope −0.23, 95% CI −0.61..0.15) and 6 (max drawdown $14.34 vs $10) |
+| B1 | +$75 | | |
+| B4 | +$4 | | |
+| B2 | −$6 | | |
+
+All four showed a significant positive out-of-sample log-loss gain over the market.
+
+**B5: forward-only test of the B3 rule**
+
+- **Rule:** *identical to B3, no changes.*
+  - Model: station EMOS (NBM + GFS/NAM MOS, min-CRPS NGR, refit monthly on [t−365, t−2]).
+  - Decision time: **D1E** (17:00 local, the day before).
+  - Combination: Benter conditional logit with fixed priors α~N(0,.25²), β~N(1,.25²), γ~N(0,.5²),
+    a Laplace posterior with 200 draws, and a trade only if the 10th-percentile edge after the
+    exact fee is above 0.
+  - Sizing: fractional Kelly λ = 0.1 on the $66.76 bankroll parameter, at least 1 contract, with
+    the $4 per city-day cap.
+  - Freezing the rule, flaws included, is deliberate. Changing it after seeing results would turn
+    the forward test into another backtest.
+- **Evaluation data:** live paper trades (slice S5) only, with decision times after the S5
+  paper-trading start. No archived data counts.
+- **Pass criteria:** gate criteria 1–6 (§6), including criterion 5 (edge slope and log-loss gain)
+  and criterion 6 (drawdown at the paper sizing), applied to the forward paper record at the new
+  per-variant α. As with L5, criterion 1 implies about 6 months of paper trading before a verdict.
+- **Kill switch:** the S5 SPRT/CUSUM monitor runs on B5's paper record from day one. B5 is dropped
+  early if the SPRT stop boundary (ΣΛ ≤ −1.56) is crossed.
+- **Live inputs:** in paper trading, B5 must use only forecast issuances that were actually
+  available at the decision time. S5 refreshes the latest issuances shortly before each decision,
+  so the inputs match what the rule saw in the backtest (`available_at` ≤ decision).
+
+**Multiple testing:** K becomes **10** (L1–L5 + B1–B5), so the per-variant α is
+**0.05 / 10 = 0.005** from this date. Earlier verdicts already failed at looser α, so they are
+unchanged. L5 and B5 are judged at 0.005. The code constant `PREREGISTERED_K` changes to 10 in
+slice S5, before any paper data is evaluated.
