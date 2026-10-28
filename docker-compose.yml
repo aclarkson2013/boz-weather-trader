@@ -52,6 +52,7 @@ services:
       dockerfile: Dockerfile.backend
     image: boz-weather-trader-backend
     restart: unless-stopped
+    init: true  # reap zombies left by killed health-check probes
     ports:
       - "8000:8000"
     env_file: .env.docker
@@ -67,16 +68,17 @@ services:
     # so it's auto-loaded for dev but NOT used by the updater sidecar.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
-      interval: 30s
-      timeout: 15s
-      retries: 3
-      start_period: 30s
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
 
   # ─── Celery Worker (processes tasks) ───
   celery-worker:
     logging: *default-logging
     image: boz-weather-trader-backend
     restart: unless-stopped
+    init: true  # reap zombies left by killed health-check probes
     env_file: .env.docker
     depends_on:
       postgres:
@@ -89,17 +91,18 @@ services:
     volumes:
       - modeldata:/app/models
     healthcheck:
-      test: ["CMD-SHELL", "celery -A backend.celery_app inspect ping --timeout 10"]
-      interval: 30s
-      timeout: 15s
-      retries: 3
-      start_period: 30s
+      test: ["CMD-SHELL", "celery -A backend.celery_app inspect ping --timeout 20"]
+      interval: 60s
+      timeout: 45s
+      retries: 5
+      start_period: 90s
 
   # ─── Celery Beat (schedules tasks) ───
   celery-beat:
     logging: *default-logging
     image: boz-weather-trader-backend
     restart: unless-stopped
+    init: true  # reap zombies left by killed health-check probes
     env_file: .env.docker
     depends_on:
       - redis
@@ -108,9 +111,9 @@ services:
     command: celery -A backend.celery_app beat --loglevel=info
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import redis; r=redis.from_url('redis://redis:6379/1'); r.ping()\""]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 60s
+      timeout: 30s
+      retries: 5
       start_period: 15s
 
   # ─── Next.js Frontend (PWA) ───
@@ -124,6 +127,7 @@ services:
         NEXT_PUBLIC_API_URL: http://localhost:8000
         NEXT_PUBLIC_APP_VERSION: ${APP_VERSION:-1.0.0}
     restart: unless-stopped
+    init: true  # reap zombies left by killed health-check probes
     ports:
       - "3000:3000"
     depends_on:
@@ -136,6 +140,7 @@ services:
     build:
       context: ./scripts/updater
     restart: unless-stopped
+    init: true  # reap zombies left by killed health-check probes
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/project
